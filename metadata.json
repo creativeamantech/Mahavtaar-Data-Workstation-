@@ -1,0 +1,8 @@
+{
+  "name": "Remix Mahavtaar Ledger",
+  "description": "Imported from GitHub: creativeamantech/advance-app-muse",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

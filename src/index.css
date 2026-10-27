@@ -1,0 +1,208 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Institutional Light Theme - Crisp slate canvas with deep contrast */
+    --background: 210 20% 98%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Brand Primary - Institutional Deep Cobalt */
+    --primary: 221 83% 53%;
+    --primary-foreground: 210 40% 98%;
+
+    /* Secondary & Muted */
+    --secondary: 215 16% 47%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 210 20% 95%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Accent & Interactive */
+    --accent: 217 91% 60%;
+    --accent-foreground: 222 47% 11%;
+
+    /* Semantic Status Tokens */
+    --success: 158 64% 42%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --info: 200 95% 45%;
+    --info-foreground: 0 0% 100%;
+
+    /* Structural Borders & Inputs */
+    --border: 214 32% 91%;
+    --border-subtle: 214 32% 95%;
+    --input: 214 32% 91%;
+    --ring: 221 83% 53%;
+
+    /* Geometric Radius Scale */
+    --radius-xs: 0.25rem;
+    --radius-sm: 0.375rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 0.75rem;
+    --radius-xl: 1rem;
+    --radius: var(--radius-md);
+
+    /* Sidebar & Mobile Nav */
+    --sidebar-bg: 222 47% 11%;
+    --sidebar-fg: 210 40% 98%;
+    --sidebar-border: 217 33% 18%;
+
+    /* Bucket Financial Codes */
+    --bucket-current: 158 64% 42%;
+    --bucket-1-30: 221 83% 53%;
+    --bucket-31-60: 38 92% 50%;
+    --bucket-61-90: 16 90% 52%;
+    --bucket-npa: 0 84% 60%;
+
+    /* Disposition Statuses */
+    --disp-ptp: 221 83% 53%;
+    --disp-rnr: 215 16% 47%;
+    --disp-rtp: 38 92% 50%;
+    --disp-settled: 158 64% 42%;
+    --disp-paid: 158 64% 42%;
+  }
+
+  .dark {
+    /* Institutional Dark Theme - Sophisticated deep navy/charcoal */
+    --background: 224 35% 8%;       /* #0d111a - Rich Calm Financial Dark */
+    --foreground: 210 40% 98%;
+
+    --card: 222 35% 11%;            /* #121724 - Elevated Surface 1 */
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 35% 11%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 217 91% 60%;         /* #3b82f6 - Crisp Institutional Blue */
+    --primary-foreground: 222 47% 11%;
+
+    --secondary: 217 24% 20%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 220 28% 16%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 217 33% 22%;
+    --accent-foreground: 210 40% 98%;
+
+    --success: 158 70% 45%;
+    --success-foreground: 222 47% 11%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 222 47% 11%;
+    --destructive: 350 89% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --info: 199 89% 58%;
+    --info-foreground: 222 47% 11%;
+
+    --border: 217 28% 18%;          /* #1e2638 - Crisp structural border */
+    --border-subtle: 217 28% 14%;
+    --input: 217 28% 18%;
+    --ring: 217 91% 60%;
+
+    --sidebar-bg: 224 40% 6%;
+    --sidebar-fg: 210 40% 98%;
+    --sidebar-border: 217 28% 14%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Standard Tabular Numerals for Financial Accuracy */
+  .font-tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "cv05" 1;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer components {
+  /* Institutional Surface Primitives */
+  .surface-canvas {
+    @apply bg-background text-foreground;
+  }
+
+  .surface-card {
+    @apply bg-card border border-border/90 rounded-xl shadow-[0_1px_3px_0_rgba(0,0,0,0.05),0_1px_2px_-1px_rgba(0,0,0,0.05)];
+  }
+
+  .surface-card-hover {
+    @apply surface-card hover:border-primary/40 hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] transition-all duration-200;
+  }
+
+  .surface-panel {
+    @apply bg-muted/40 border border-border/80 rounded-lg;
+  }
+
+  /* Financial Metrics & Data Chips */
+  .metric-kpi-card {
+    @apply bg-card border border-border/80 rounded-xl p-4 shadow-xs flex flex-col justify-between hover:border-border transition-all duration-200;
+  }
+
+  .chip-tag {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide uppercase;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
+  }
+}
+
+@supports (padding: max(0px)) {
+  .bottom-nav {
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+  .mobile-main-content {
+    padding-bottom: max(64px, calc(64px + env(safe-area-inset-bottom)));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .animate-pulse {
+    animation-duration: 2s !important;
+  }
+}
