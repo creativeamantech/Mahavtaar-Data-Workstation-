@@ -1,19 +1,18 @@
-import { db, SyncJournalRecord } from '../db';
+import { getUnsyncedJournalEntries } from './journal';
 import { getLocalDeviceIdentity } from './deviceIdentity';
-import { getUnsyncedJournalEntries, markJournalEntriesSynced } from './journal';
 import { RelayFallbackTransport } from './transports/RelayFallbackTransport';
 import { TransportEventHandler } from './transports/TransportAdapter';
 import { SyncMessageEnvelope } from './types';
 
-const BATCH_SIZE = 100;
 const POLL_INTERVAL_MS = 2000;
 
 /**
- * Local-first journal sync coordinator.
+ * Same-origin tab invalidation only.
  *
- * Current transport scope is same-origin browser tabs only. Incoming changes
- * are applied only when the sending peer is explicitly approved in local
- * sync_peers. This is not a cross-device internet relay.
+ * IndexedDB is already shared by tabs on the same origin, so this engine sends
+ * only a lightweight notification when queued local changes appear. It never
+ * broadcasts loan/customer data and does not mark journal entries synced.
+ * Cross-device sync requires a separately authenticated transport.
  */
 export class SyncEngine {
   private readonly identity = getLocalDeviceIdentity();
@@ -22,13 +21,12 @@ export class SyncEngine {
   private onDataChanged?: () => void;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private started = false;
-  private sending = false;
+  private polling = false;
+  private readonly notifiedJournalIds = new Set<string>();
   private readonly seenMessageIds = new Set<string>();
 
   constructor(onDataChanged?: () => void) {
     this.onDataChanged = onDataChanged;
-    // Include a per-tab identifier so tabs in the same browser do not mistake
-    // each other for the same peer when localStorage device identity is shared.
     const tabId = typeof crypto !== 'undefined' && crypto.randomUUID
       ? crypto.randomUUID()
       : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -44,8 +42,8 @@ export class SyncEngine {
     };
     await this.transport.init(handler);
     this.started = true;
-    await this.flushQueuedChanges();
-    this.pollTimer = setInterval(() => { void this.flushQueuedChanges(); }, POLL_INTERVAL_MS);
+    await this.notifyLocalChanges();
+    this.pollTimer = setInterval(() => { void this.notifyLocalChanges(); }, POLL_INTERVAL_MS);
   }
 
   async stop(): Promise<void> {
@@ -55,33 +53,35 @@ export class SyncEngine {
     this.started = false;
   }
 
-  async flushQueuedChanges(): Promise<number> {
-    if (!this.started || this.sending) return 0;
-    this.sending = true;
-    let sent = 0;
+  async notifyLocalChanges(): Promise<number> {
+    if (!this.started || this.polling) return 0;
+    this.polling = true;
+    let notified = 0;
     try {
-      const entries = (await getUnsyncedJournalEntries()).filter(entry => entry.tableName === 'loan_records');
-      for (let offset = 0; offset < entries.length; offset += BATCH_SIZE) {
-        const batch = entries.slice(offset, offset + BATCH_SIZE);
-        const envelope: SyncMessageEnvelope = {
+      const entries = (await getUnsyncedJournalEntries())
+        .filter(entry => entry.tableName === 'loan_records' && !this.notifiedJournalIds.has(entry.id));
+      for (const entry of entries) {
+        const message: SyncMessageEnvelope = {
           id: crypto.randomUUID(),
-          type: 'JOURNAL_PUSH',
+          type: 'HEARTBEAT',
           senderPeerId: this.tabPeerId,
           senderDeviceId: this.identity.deviceId,
           timestamp: new Date().toISOString(),
-          lamport: Math.max(0, ...batch.map(entry => entry.lamport)),
-          payload: { entries: batch },
+          lamport: Math.max(0, entry.lamport),
+          payload: { kind: 'LOCAL_DATA_CHANGED' },
         };
-        // BroadcastChannel delivery is best-effort; don't mark as synced until
-        // an approved peer acknowledges receipt.
-        if (await this.transport.broadcast(envelope)) sent += batch.length;
+        if (await this.transport.broadcast(message)) {
+          this.notifiedJournalIds.add(entry.id);
+          notified++;
+        }
       }
+      if (this.notifiedJournalIds.size > 5000) this.notifiedJournalIds.clear();
     } catch (error) {
-      console.error('[SyncEngine] failed to flush journal', error);
+      console.error('[SyncEngine] failed to notify local changes', error);
     } finally {
-      this.sending = false;
+      this.polling = false;
     }
-    return sent;
+    return notified;
   }
 
   private async handleMessage(message: SyncMessageEnvelope): Promise<void> {
@@ -89,74 +89,13 @@ export class SyncEngine {
     this.seenMessageIds.add(message.id);
     if (this.seenMessageIds.size > 2000) this.seenMessageIds.clear();
 
-    if (message.type === 'JOURNAL_ACK' && Array.isArray(message.payload?.entryIds)) {
-      await markJournalEntriesSynced(message.payload.entryIds, message.senderPeerId.split(':')[0]);
-      return;
-    }
-    if (message.type !== 'JOURNAL_PUSH' || !Array.isArray(message.payload?.entries)) return;
-    if (!message.senderPeerId || message.senderPeerId === this.tabPeerId) return;
+    if (message.type !== 'HEARTBEAT' ||
+        message.payload?.kind !== 'LOCAL_DATA_CHANGED' ||
+        !message.senderPeerId ||
+        message.senderPeerId === this.tabPeerId) return;
 
-    const approvedPeerId = message.senderPeerId.split(':')[0];
-    const isSameDeviceTab = approvedPeerId === this.identity.peerId;
-    const peer = isSameDeviceTab ? null : await db.sync_peers.get(approvedPeerId);
-    if (!isSameDeviceTab && (!peer || peer.status !== 'APPROVED')) {
-      console.warn('[SyncEngine] ignored journal from unapproved peer', message.senderPeerId);
-      return;
-    }
-
-    const entries = message.payload.entries as SyncJournalRecord[];
-    const acceptedIds: string[] = [];
-    for (const entry of entries.slice(0, BATCH_SIZE)) {
-      if (!entry || !entry.id || entry.tableName !== 'loan_records' ||
-          !['INSERT', 'UPDATE', 'DELETE'].includes(entry.action)) continue;
-
-      // Re-check approval immediately before each write.
-      const currentPeer = isSameDeviceTab ? null : await db.sync_peers.get(approvedPeerId);
-      if (!isSameDeviceTab && (!currentPeer || currentPeer.status !== 'APPROVED')) return;
-
-      try {
-        await db.transaction('rw', db.loan_records, db.sync_journal, async () => {
-          const duplicate = await db.sync_journal.get(entry.id);
-          if (duplicate) {
-            acceptedIds.push(entry.id);
-            return;
-          }
-
-          if (entry.action === 'DELETE') {
-            await db.loan_records.delete(entry.recordId);
-          } else if (entry.data && typeof entry.data === 'object' &&
-                     String(entry.data.agreementid || '') === entry.recordId) {
-            await db.loan_records.put(entry.data);
-          } else {
-            throw new Error('Invalid loan record journal payload');
-          }
-
-          await db.sync_journal.put({
-            ...entry,
-            peerId: approvedPeerId,
-            status: 'SYNCED',
-            syncedPeers: [this.identity.peerId],
-          });
-          acceptedIds.push(entry.id);
-        });
-      } catch (error) {
-        console.error('[SyncEngine] rejected journal entry', entry.id, error);
-      }
-    }
-
-    if (acceptedIds.length) {
-      this.onDataChanged?.();
-      const ack: SyncMessageEnvelope = {
-        id: crypto.randomUUID(),
-        type: 'JOURNAL_ACK',
-        senderPeerId: this.tabPeerId,
-        senderDeviceId: this.identity.deviceId,
-        targetPeerId: message.senderPeerId,
-        timestamp: new Date().toISOString(),
-        lamport: message.lamport,
-        payload: { entryIds: acceptedIds },
-      };
-      await this.transport.send(message.senderPeerId, ack);
-    }
+    // Tabs share the same IndexedDB database; only refresh UI state.
+    // No incoming record payload is accepted or written from BroadcastChannel.
+    this.onDataChanged?.();
   }
 }
