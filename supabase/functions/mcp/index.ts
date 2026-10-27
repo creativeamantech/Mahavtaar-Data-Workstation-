@@ -111,7 +111,17 @@ Deno.serve(async (request: Request) => {
     }), 200, origin);
   }
   if (rpc.method === 'notifications/initialized') {
-    return new Response(null, { status: 202 });
+    const headers = new Headers({ 'vary': 'Origin' });
+    const configuredOrigins = (Deno.env.get('MCP_ALLOWED_ORIGINS') ?? '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (origin && configuredOrigins.includes(origin)) {
+      headers.set('access-control-allow-origin', origin);
+      headers.set('access-control-allow-headers', 'authorization, content-type, mcp-protocol-version');
+      headers.set('access-control-allow-methods', 'POST, OPTIONS');
+    }
+    return new Response(null, { status: 202, headers });
   }
   if (rpc.method === 'ping') return jsonResponse(rpcResult(rpc.id, {}), 200, origin);
 
