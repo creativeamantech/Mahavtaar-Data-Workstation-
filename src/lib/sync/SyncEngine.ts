@@ -8,11 +8,9 @@ const POLL_INTERVAL_MS = 2000;
 
 /**
  * Same-origin tab invalidation only.
- *
- * IndexedDB is already shared by tabs on the same origin, so this engine sends
- * only a lightweight notification when queued local changes appear. It never
- * broadcasts loan/customer data and does not mark journal entries synced.
- * Cross-device sync requires a separately authenticated transport.
+ * IndexedDB is shared by tabs on the same origin, so this sends only a
+ * lightweight notification. It never broadcasts loan/customer data or marks
+ * journal entries synced. Cross-device sync needs an authenticated transport.
  */
 export class SyncEngine {
   private readonly identity = getLocalDeviceIdentity();
@@ -56,32 +54,31 @@ export class SyncEngine {
   async notifyLocalChanges(): Promise<number> {
     if (!this.started || this.polling) return 0;
     this.polling = true;
-    let notified = 0;
     try {
       const entries = (await getUnsyncedJournalEntries())
         .filter(entry => entry.tableName === 'loan_records' && !this.notifiedJournalIds.has(entry.id));
-      for (const entry of entries) {
-        const message: SyncMessageEnvelope = {
-          id: crypto.randomUUID(),
-          type: 'HEARTBEAT',
-          senderPeerId: this.tabPeerId,
-          senderDeviceId: this.identity.deviceId,
-          timestamp: new Date().toISOString(),
-          lamport: Math.max(0, entry.lamport),
-          payload: { kind: 'LOCAL_DATA_CHANGED' },
-        };
-        if (await this.transport.broadcast(message)) {
-          this.notifiedJournalIds.add(entry.id);
-          notified++;
-        }
-      }
+      if (entries.length === 0) return 0;
+
+      const message: SyncMessageEnvelope = {
+        id: crypto.randomUUID(),
+        type: 'HEARTBEAT',
+        senderPeerId: this.tabPeerId,
+        senderDeviceId: this.identity.deviceId,
+        timestamp: new Date().toISOString(),
+        lamport: Math.max(0, ...entries.map(entry => entry.lamport)),
+        payload: { kind: 'LOCAL_DATA_CHANGED' },
+      };
+      if (!await this.transport.broadcast(message)) return 0;
+
+      for (const entry of entries) this.notifiedJournalIds.add(entry.id);
       if (this.notifiedJournalIds.size > 5000) this.notifiedJournalIds.clear();
+      return entries.length;
     } catch (error) {
       console.error('[SyncEngine] failed to notify local changes', error);
+      return 0;
     } finally {
       this.polling = false;
     }
-    return notified;
   }
 
   private async handleMessage(message: SyncMessageEnvelope): Promise<void> {
@@ -94,8 +91,7 @@ export class SyncEngine {
         !message.senderPeerId ||
         message.senderPeerId === this.tabPeerId) return;
 
-    // Tabs share the same IndexedDB database; only refresh UI state.
-    // No incoming record payload is accepted or written from BroadcastChannel.
+    // Tabs share IndexedDB; refresh UI only. Never accept record data from the channel.
     this.onDataChanged?.();
   }
 }
