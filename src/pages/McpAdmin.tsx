@@ -101,7 +101,7 @@ export default function McpAdmin() {
         {results.length > 0 && <Card>
           <CardHeader><CardTitle>Connection check</CardTitle><CardDescription>Live result from this attempt.</CardDescription></CardHeader>
           <CardContent className="space-y-3">
-            {results.map(result => <div key={result.label} className="rounded-md border p-3" key={result.label}><p className="font-medium">{result.ok ? "✓" : "✕"} {result.label}</p><p className="mt-1 break-words text-sm text-muted-foreground">{result.detail}</p></div>)}
+            {results.map(result => <div key={result.label} className="rounded-md border p-3"><p className="font-medium">{result.ok ? "✓" : "✕"} {result.label}</p><p className="mt-1 break-words text-sm text-muted-foreground">{result.detail}</p></div>)}
           </CardContent>
         </Card>}
         <p className="text-xs text-muted-foreground">This page does not create Supabase users, change roles, deploy functions, or modify database tables. Do not enter your local app password here.</p>
