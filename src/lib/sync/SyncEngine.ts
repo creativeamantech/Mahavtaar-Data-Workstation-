@@ -97,8 +97,9 @@ export class SyncEngine {
     if (!message.senderPeerId || message.senderPeerId === this.tabPeerId) return;
 
     const approvedPeerId = message.senderPeerId.split(':')[0];
-    const peer = await db.sync_peers.get(approvedPeerId);
-    if (!peer || peer.status !== 'APPROVED') {
+    const isSameDeviceTab = approvedPeerId === this.identity.peerId;
+    const peer = isSameDeviceTab ? null : await db.sync_peers.get(approvedPeerId);
+    if (!isSameDeviceTab && (!peer || peer.status !== 'APPROVED')) {
       console.warn('[SyncEngine] ignored journal from unapproved peer', message.senderPeerId);
       return;
     }
@@ -110,8 +111,8 @@ export class SyncEngine {
           !['INSERT', 'UPDATE', 'DELETE'].includes(entry.action)) continue;
 
       // Re-check approval immediately before each write.
-      const currentPeer = await db.sync_peers.get(approvedPeerId);
-      if (!currentPeer || currentPeer.status !== 'APPROVED') return;
+      const currentPeer = isSameDeviceTab ? null : await db.sync_peers.get(approvedPeerId);
+      if (!isSameDeviceTab && (!currentPeer || currentPeer.status !== 'APPROVED')) return;
 
       try {
         await db.transaction('rw', db.loan_records, db.sync_journal, async () => {
