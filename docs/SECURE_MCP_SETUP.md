@@ -7,7 +7,7 @@ The repository contains an authenticated, read-only MCP-over-HTTP Edge Function 
 - Supabase project: `Mahavtaar Ledger` (`ycyxlldgserhtaepzhll`), status `ACTIVE_HEALTHY`.
 - The live `public` schema currently has no tables.
 - No Edge Functions are currently deployed to the project.
-- Supabase Security Advisor reports that `public.rls_auto_enable()` is a SECURITY DEFINER function executable by both `anon` and `authenticated`. Review and remediate this separately before relying on the project for sensitive data: https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable
+- Supabase Security Advisor reports that `public.rls_auto_enable()` is a SECURITY DEFINER event-trigger function executable by `anon` and `authenticated`. Read-only inspection confirms it enables RLS on newly created tables in `public`, uses `search_path = pg_catalog`, and catches/logs failures. Its execution grant to public client roles is still unnecessary risk; review/revoke those grants without changing the function's owner/event-trigger behavior, then re-run the advisor: https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable
 - GitHub Actions CI for the MCP admin page, route, and CORS changes passed: https://github.com/creativeamantech/Mahavtaar-Data-Workstation-/actions
 
 These findings are observations only. This work has not deployed the Edge Function, changed database schema, or modified the live project.
