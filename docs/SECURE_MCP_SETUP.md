@@ -1,6 +1,16 @@
 # Secure MCP endpoint
 
-The Edge Function at `supabase/functions/mcp/index.ts` is an authenticated, read-only MCP-over-HTTP endpoint. It is deliberately separate from the browser's IndexedDB login.
+The repository contains an authenticated, read-only MCP-over-HTTP Edge Function at `supabase/functions/mcp/index.ts` and a separate browser admin page at `/mcp-admin` (`src/pages/McpAdmin.tsx`). The admin page uses Supabase Auth and does not change the existing local IndexedDB login.
+
+## Verified project state (2026-10-28)
+
+- Supabase project: `Mahavtaar Ledger` (`ycyxlldgserhtaepzhll`), status `ACTIVE_HEALTHY`.
+- The live `public` schema currently has no tables.
+- No Edge Functions are currently deployed to the project.
+- Supabase Security Advisor reports that `public.rls_auto_enable()` is a SECURITY DEFINER function executable by both `anon` and `authenticated`. Review and remediate this separately before relying on the project for sensitive data: https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable
+- GitHub Actions CI for the MCP admin page, route, and CORS changes passed: https://github.com/creativeamantech/Mahavtaar-Data-Workstation-/actions
+
+These findings are observations only. This work has not deployed the Edge Function, changed database schema, or modified the live project.
 
 ## Required server-side configuration
 
@@ -9,9 +19,9 @@ Configure these Supabase Edge Function secrets; never add service-role credentia
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `MCP_ALLOWED_ORIGINS` (comma-separated exact origins only if browser clients are required)
+- `MCP_ALLOWED_ORIGINS` (comma-separated exact origins for browser clients; use the exact deployed app origin)
 
-The endpoint verifies the bearer token with Supabase Auth and permits calls only when the authenticated user's server-controlled `app_metadata.role` is `ADMIN`. Do not use `user_metadata.role` for authorization.
+The endpoint verifies the bearer token with Supabase Auth and permits calls only when the authenticated user's server-controlled `app_metadata.role` is `ADMIN`. Do not use `user_metadata.role` for authorization. The admin page's login uses Supabase Auth email/password; it does not create accounts or assign roles.
 
 ## Current tools
 
@@ -19,14 +29,20 @@ The endpoint verifies the bearer token with Supabase Auth and permits calls only
 - `list_tables`: checks the approved workstation tables and row counts.
 - `search_loan_records`: read-only agreement-ID search, maximum 25 rows.
 
-The endpoint does not create tables, mutate customer data, or modify the live database. The current live project was previously found to have no public tables, so `list_tables` will report missing tables until the reviewed schema/migrations are deliberately applied.
+The endpoint does not create tables or mutate customer data. Since the live project has no public tables and no deployed Edge Function, MCP is not operational yet. The workstation's current app login is local IndexedDB authentication and does not issue a Supabase Auth JWT. A separate Supabase Auth admin account with server-managed `app_metadata.role = ADMIN` is required.
 
-## Important limitations
+## Safe activation order
 
-The workstation's existing app login is local IndexedDB authentication and does not issue a Supabase Auth JWT. MCP clients must use a real Supabase Auth session with server-controlled ADMIN app metadata. Do not deploy this endpoint for operational use until the identity mapping and table schema are reviewed.
+1. Review the intended database schema and row-level security policies. Do not create production tables blindly; the local-first application remains the primary store for now.
+2. Review the existing `public.rls_auto_enable()` function and revoke public execution or change its security mode as appropriate. Do not assume this function is safe merely because it exists.
+3. Create/provision a Supabase Auth admin identity through a trusted admin process and set `app_metadata.role = ADMIN` server-side. Never set this role from the browser or `user_metadata`.
+4. Configure the Edge Function secrets and exact `MCP_ALLOWED_ORIGINS` value.
+5. Deploy the MCP function, then test sign-in and `tools/list` from `/mcp-admin`. Only test data tools after the reviewed tables exist and contain approved test data.
+
+## Local-first sync scope
 
 The current sync transport is same-origin browser-tab notification only. It broadcasts a `LOCAL_DATA_CHANGED` signal, not loan/customer records, and it does not mark journal entries as synchronized. It is not cross-device synchronization.
 
-The current local device identity's `publicKeyFingerprint` is a random label, not a fingerprint derived from a cryptographic public key. Peer IDs and this label must not be treated as proof of identity for remote authorization. Before enabling cross-device sync, implement authenticated peer enrollment, cryptographic key generation/signature verification, a server-verified user-to-device mapping, and an authenticated relay. Test these flows before using real customer data.
+The current local device identity's `publicKeyFingerprint` is a random label, not a fingerprint derived from a cryptographic public key. Peer IDs and this label must not be treated as proof of identity for remote authorization. Because the intended initial use is one Android device, cross-device peer enrollment, cryptographic device identity, and relay are deferred until multi-device sync is a real requirement.
 
-Do not deploy the relay or apply database migrations until the schema, identity mapping, and access policies have been reviewed. The live database has not been changed by this branch work.
+Do not deploy a relay or apply database migrations as part of this task. Live database changes require a separate schema and access-policy review.
