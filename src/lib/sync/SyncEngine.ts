@@ -60,7 +60,7 @@ export class SyncEngine {
     this.sending = true;
     let sent = 0;
     try {
-      const entries = await getUnsyncedJournalEntries();
+      const entries = (await getUnsyncedJournalEntries()).filter(entry => entry.tableName === 'loan_records');
       for (let offset = 0; offset < entries.length; offset += BATCH_SIZE) {
         const batch = entries.slice(offset, offset + BATCH_SIZE);
         const envelope: SyncMessageEnvelope = {
