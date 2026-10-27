@@ -54,7 +54,20 @@ function textContent(value: unknown) {
 
 Deno.serve(async (request: Request) => {
   const origin = request.headers.get('origin') ?? '';
-  if (request.method === 'OPTIONS') return new Response(null, { status: 204 });
+  if (request.method === 'OPTIONS') {
+    const configuredOrigins = (Deno.env.get('MCP_ALLOWED_ORIGINS') ?? '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const headers = new Headers({ 'vary': 'Origin' });
+    if (origin && configuredOrigins.includes(origin)) {
+      headers.set('access-control-allow-origin', origin);
+      headers.set('access-control-allow-headers', 'authorization, content-type, mcp-protocol-version');
+      headers.set('access-control-allow-methods', 'POST, OPTIONS');
+      headers.set('access-control-max-age', '600');
+    }
+    return new Response(null, { status: 204, headers });
+  }
   if (request.method !== 'POST') {
     return jsonResponse({ error: 'POST required' }, 405, origin);
   }
