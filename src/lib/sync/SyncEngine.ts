@@ -18,18 +18,22 @@ const POLL_INTERVAL_MS = 2000;
 export class SyncEngine {
   private readonly identity = getLocalDeviceIdentity();
   private readonly transport: RelayFallbackTransport;
+  private readonly tabPeerId: string;
+  private onDataChanged?: () => void;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private started = false;
   private sending = false;
   private readonly seenMessageIds = new Set<string>();
 
-  constructor() {
+  constructor(onDataChanged?: () => void) {
+    this.onDataChanged = onDataChanged;
     // Include a per-tab identifier so tabs in the same browser do not mistake
     // each other for the same peer when localStorage device identity is shared.
     const tabId = typeof crypto !== 'undefined' && crypto.randomUUID
       ? crypto.randomUUID()
       : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    this.transport = new RelayFallbackTransport(`${this.identity.peerId}:${tabId}`);
+    this.tabPeerId = `${this.identity.peerId}:${tabId}`;
+    this.transport = new RelayFallbackTransport(this.tabPeerId);
   }
 
   async start(): Promise<void> {
@@ -62,7 +66,7 @@ export class SyncEngine {
         const envelope: SyncMessageEnvelope = {
           id: crypto.randomUUID(),
           type: 'JOURNAL_PUSH',
-          senderPeerId: `${this.identity.peerId}:local`,
+          senderPeerId: this.tabPeerId,
           senderDeviceId: this.identity.deviceId,
           timestamp: new Date().toISOString(),
           lamport: Math.max(0, ...batch.map(entry => entry.lamport)),
@@ -85,10 +89,15 @@ export class SyncEngine {
     this.seenMessageIds.add(message.id);
     if (this.seenMessageIds.size > 2000) this.seenMessageIds.clear();
 
+    if (message.type === 'JOURNAL_ACK' && Array.isArray(message.payload?.entryIds)) {
+      await markJournalEntriesSynced(message.payload.entryIds, message.senderPeerId.split(':')[0]);
+      return;
+    }
     if (message.type !== 'JOURNAL_PUSH' || !Array.isArray(message.payload?.entries)) return;
-    if (!message.senderPeerId || message.senderPeerId === `${this.identity.peerId}:local`) return;
+    if (!message.senderPeerId || message.senderPeerId === this.tabPeerId) return;
 
-    const peer = await db.sync_peers.get(message.senderPeerId);
+    const approvedPeerId = message.senderPeerId.split(':')[0];
+    const peer = await db.sync_peers.get(approvedPeerId);
     if (!peer || peer.status !== 'APPROVED') {
       console.warn('[SyncEngine] ignored journal from unapproved peer', message.senderPeerId);
       return;
@@ -101,7 +110,7 @@ export class SyncEngine {
           !['INSERT', 'UPDATE', 'DELETE'].includes(entry.action)) continue;
 
       // Re-check approval immediately before each write.
-      const currentPeer = await db.sync_peers.get(message.senderPeerId);
+      const currentPeer = await db.sync_peers.get(approvedPeerId);
       if (!currentPeer || currentPeer.status !== 'APPROVED') return;
 
       try {
@@ -123,7 +132,7 @@ export class SyncEngine {
 
           await db.sync_journal.put({
             ...entry,
-            peerId: message.senderPeerId,
+            peerId: approvedPeerId,
             status: 'SYNCED',
             syncedPeers: [this.identity.peerId],
           });
@@ -135,10 +144,11 @@ export class SyncEngine {
     }
 
     if (acceptedIds.length) {
+      this.onDataChanged?.();
       const ack: SyncMessageEnvelope = {
         id: crypto.randomUUID(),
         type: 'JOURNAL_ACK',
-        senderPeerId: `${this.identity.peerId}:local`,
+        senderPeerId: this.tabPeerId,
         senderDeviceId: this.identity.deviceId,
         targetPeerId: message.senderPeerId,
         timestamp: new Date().toISOString(),
