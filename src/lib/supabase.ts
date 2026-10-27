@@ -246,6 +246,20 @@ export async function syncWithSupabase(
   }
 
   try {
+    // Require a real Supabase Auth session before any cloud data access.
+    // The app's current local IndexedDB login does not create this session, so sync
+    // remains safely disabled until the authenticated server-side flow is implemented.
+    const { data: authData, error: authError } = await client.auth.getSession();
+    if (authError || !authData.session) {
+      return {
+        success: false,
+        pushed: 0,
+        pulled: 0,
+        errors: ['Secure cloud sync is unavailable: sign in through Supabase Auth first. Local IndexedDB data remains available.'],
+        durationMs: Math.round(performance.now() - startTime),
+      };
+    }
+
     // 1. STATE TARGETS
     if (direction === 'push' || direction === 'bidirectional') {
       onProgress?.('Pushing State Targets to Supabase...', 1, 7);
@@ -268,27 +282,10 @@ export async function syncWithSupabase(
       }
     }
 
-    // 2. USERS
-    if (direction === 'push' || direction === 'bidirectional') {
-      onProgress?.('Pushing Users to Supabase...', 3, 7);
-      const localUsers = await db.users.toArray();
-      if (localUsers.length > 0) {
-        const { error } = await client
-          .from('users')
-          .upsert(localUsers, { onConflict: 'id' });
-        if (error) errors.push(`Users push error: ${error.message}`);
-        else totalPushed += localUsers.length;
-      }
-    }
-
-    if (direction === 'pull' || direction === 'bidirectional') {
-      onProgress?.('Pulling Users from Supabase...', 4, 7);
-      const { data, error } = await client.from('users').select('*');
-      if (!error && data && data.length > 0) {
-        await db.users.bulkPut(data as StoredUser[]);
-        totalPulled += data.length;
-      }
-    }
+    // 2. USERS — deliberately excluded from cloud sync.
+    // Local application credentials contain password hashes/salts and must never be
+    // copied to Supabase through the browser client. User provisioning belongs on
+    // an authenticated server-side/MCP path with explicit identity mapping.
 
     // 3. ATTENDANCE LOGS
     if (direction === 'push' || direction === 'bidirectional') {
