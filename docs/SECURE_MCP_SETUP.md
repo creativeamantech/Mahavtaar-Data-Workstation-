@@ -23,4 +23,10 @@ The endpoint does not create tables, mutate customer data, or modify the live da
 
 ## Important limitations
 
-The workstation's existing app login is local IndexedDB authentication and does not issue a Supabase Auth JWT. MCP clients must use a real Supabase Auth session with server-controlled ADMIN app metadata. Do not deploy this endpoint for operational use until the identity mapping and table schema are reviewed. Cross-device synchronization also requires a separate authenticated relay; the browser BroadcastChannel transport only works between tabs on the same origin and device.
+The workstation's existing app login is local IndexedDB authentication and does not issue a Supabase Auth JWT. MCP clients must use a real Supabase Auth session with server-controlled ADMIN app metadata. Do not deploy this endpoint for operational use until the identity mapping and table schema are reviewed.
+
+The current sync transport is same-origin browser-tab notification only. It broadcasts a `LOCAL_DATA_CHANGED` signal, not loan/customer records, and it does not mark journal entries as synchronized. It is not cross-device synchronization.
+
+The current local device identity's `publicKeyFingerprint` is a random label, not a fingerprint derived from a cryptographic public key. Peer IDs and this label must not be treated as proof of identity for remote authorization. Before enabling cross-device sync, implement authenticated peer enrollment, cryptographic key generation/signature verification, a server-verified user-to-device mapping, and an authenticated relay. Test these flows before using real customer data.
+
+Do not deploy the relay or apply database migrations until the schema, identity mapping, and access policies have been reviewed. The live database has not been changed by this branch work.
