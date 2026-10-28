@@ -5,7 +5,7 @@ const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const MCP_PROTOCOL_VERSION = '2025-03-26';
 
-const allowedTables = [
+const defaultAllowedTables = [
   'loan_records',
   'customer_feedbacks',
   'attendance_logs',
@@ -13,6 +13,55 @@ const allowedTables = [
   'upload_sessions',
   'audit_log',
 ] as const;
+
+// Schema introspection is dynamic; table exposure remains explicitly allowlisted.
+function getAllowedTables(): string[] {
+  const configured = (Deno.env.get('MCP_ALLOWED_TABLES') ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(item));
+  return [...new Set(configured.length ? configured : defaultAllowedTables)];
+}
+
+type OpenApiSchema = {
+  paths?: Record<string, {
+    get?: {
+      parameters?: Array<{ name?: string; in?: string }>;
+      responses?: Record<string, { schema?: { properties?: Record<string, unknown>; items?: { properties?: Record<string, unknown> } } }>;
+    };
+  }>;
+  definitions?: Record<string, { properties?: Record<string, unknown> }>;
+  components?: { schemas?: Record<string, { properties?: Record<string, unknown> }> };
+};
+
+async function getDynamicSchema(serviceRoleKey: string): Promise<Record<string, string[]>> {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/`, {
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      Accept: 'application/openapi+json',
+    },
+  });
+  if (!response.ok) throw new Error(`Schema introspection failed (HTTP ${response.status})`);
+  const spec = await response.json() as OpenApiSchema;
+  const allowed = new Set(getAllowedTables());
+  const schema: Record<string, string[]> = {};
+
+  for (const [path, definition] of Object.entries(spec.paths ?? {})) {
+    const table = path.replace(/^\\//, '').split('/')[0];
+    if (!allowed.has(table) || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table)) continue;
+    const properties = definition.get?.responses?.['200']?.schema?.items?.properties
+      ?? definition.get?.responses?.['200']?.schema?.properties
+      ?? spec.definitions?.[table]?.properties
+      ?? spec.components?.schemas?.[table]?.properties;
+    const parameterColumns = (definition.get?.parameters ?? [])
+      .filter((parameter) => parameter.in === 'query' && parameter.name && !parameter.name.startsWith('select'))
+      .map((parameter) => parameter.name as string);
+    const columns = properties ? Object.keys(properties) : parameterColumns;
+    schema[table] = [...new Set(columns)].filter((column) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(column));
+  }
+  return schema;
+}
 
 type JsonRpcRequest = {
   jsonrpc?: string;
@@ -179,16 +228,21 @@ Deno.serve(async (request: Request) => {
     }
 
     if (params.name === 'list_tables') {
-      const tables: Record<string, { exists: boolean; rowCount: number | null }> = {};
-      for (const table of allowedTables) {
+      const schema = await getDynamicSchema(SUPABASE_SERVICE_ROLE_KEY);
+      const tables: Record<string, { exists: boolean; rowCount: number | null; columns: string[] }> = {};
+      for (const table of getAllowedTables()) {
+        if (!Object.hasOwn(schema, table)) {
+          tables[table] = { exists: false, rowCount: null, columns: [] };
+          continue;
+        }
         const { count, error } = await serviceClient
           .from(table)
           .select('*', { count: 'exact', head: true });
         tables[table] = error
-          ? { exists: false, rowCount: null }
-          : { exists: true, rowCount: count ?? 0 };
+          ? { exists: false, rowCount: null, columns: schema[table] }
+          : { exists: true, rowCount: count ?? 0, columns: schema[table] };
       }
-      return jsonResponse(rpcResult(rpc.id, { content: textContent({ tables }) }), 200, origin);
+      return jsonResponse(rpcResult(rpc.id, { content: textContent({ tables, schemaSource: 'PostgREST OpenAPI', dynamic: true }) }), 200, origin);
     }
 
     if (params.name === 'search_loan_records') {
@@ -197,13 +251,39 @@ Deno.serve(async (request: Request) => {
       if (!agreementId || agreementId.length > 100) {
         return jsonResponse(rpcError(rpc.id, -32602, 'Valid agreement_id is required'), 200, origin);
       }
+      const schema = await getDynamicSchema(SUPABASE_SERVICE_ROLE_KEY);
+      const table = 'loan_records';
+      if (!getAllowedTables().includes(table) || !schema[table]?.length) {
+        throw new Error('Approved loan_records table or schema is unavailable.');
+      }
+      const columns = schema[table];
+      const agreementColumn = ['agreementid', 'agreement_id', 'agreement_no', 'agreement_number', 'loan_number']
+        .find((candidate) => columns.includes(candidate));
+      if (!agreementColumn) {
+        throw new Error('No supported agreement/loan identifier column was found in the current schema.');
+      }
+      const safeColumns = [
+        'agreementid', 'agreement_id', 'agreement_no', 'agreement_number', 'loan_number',
+        'customer_name', 'customername', 'city', 'state', 'bom_bkt', 'bucket',
+        'executive_name', 'executive',
+      ].filter((column) => columns.includes(column));
+      const selectColumns = [...new Set([agreementColumn, ...safeColumns])].join(',');
+      const safeSearch = agreementId.replace(/[%_\\\\]/g, '');
       const { data, error } = await serviceClient
-        .from('loan_records')
-        .select('agreementid, customer_name, city, state, bom_bkt, executive_name')
-        .ilike('agreementid', `%${agreementId.replace(/[%_\\\\]/g, '')}%`)
+        .from(table)
+        .select(selectColumns)
+        .ilike(agreementColumn, `%${safeSearch}%`)
         .limit(limit);
       if (error) throw error;
-      return jsonResponse(rpcResult(rpc.id, { content: textContent({ count: data?.length ?? 0, records: data ?? [] }) }), 200, origin);
+      return jsonResponse(rpcResult(rpc.id, {
+        content: textContent({
+          count: data?.length ?? 0,
+          records: data ?? [],
+          table,
+          matchedColumn: agreementColumn,
+          schemaDynamic: true,
+        }),
+      }), 200, origin);
     }
 
     return jsonResponse(rpcError(rpc.id, -32602, 'Unknown tool'), 200, origin);
