@@ -261,13 +261,45 @@ ALTER TABLE public.state_targets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.upload_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow anon for loan_records" ON public.loan_records FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow anon for customer_feedbacks" ON public.customer_feedbacks FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow anon for users" ON public.users FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow anon for attendance_logs" ON public.attendance_logs FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow anon for state_targets" ON public.state_targets FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow anon for upload_sessions" ON public.upload_sessions FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow anon for audit_log" ON public.audit_log FOR ALL USING (true) WITH CHECK (true);
+-- Never expose customer/loan data to anonymous users. Only authenticated users
+-- whose server-managed app_metadata role is ADMIN can access these tables.
+-- This is a starter policy; add per-user/tenant restrictions before granting non-admin access.
+DROP POLICY IF EXISTS "Allow anon for loan_records" ON public.loan_records;
+DROP POLICY IF EXISTS "Allow anon for customer_feedbacks" ON public.customer_feedbacks;
+DROP POLICY IF EXISTS "Allow anon for users" ON public.users;
+DROP POLICY IF EXISTS "Allow anon for attendance_logs" ON public.attendance_logs;
+DROP POLICY IF EXISTS "Allow anon for state_targets" ON public.state_targets;
+DROP POLICY IF EXISTS "Allow anon for upload_sessions" ON public.upload_sessions;
+DROP POLICY IF EXISTS "Allow anon for audit_log" ON public.audit_log;
+
+CREATE POLICY "Authenticated admins only" ON public.loan_records
+  FOR ALL TO authenticated
+  USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
+  WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
+CREATE POLICY "Authenticated admins only" ON public.customer_feedbacks
+  FOR ALL TO authenticated
+  USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
+  WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
+CREATE POLICY "Authenticated admins only" ON public.users
+  FOR ALL TO authenticated
+  USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
+  WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
+CREATE POLICY "Authenticated admins only" ON public.attendance_logs
+  FOR ALL TO authenticated
+  USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
+  WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
+CREATE POLICY "Authenticated admins only" ON public.state_targets
+  FOR ALL TO authenticated
+  USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
+  WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
+CREATE POLICY "Authenticated admins only" ON public.upload_sessions
+  FOR ALL TO authenticated
+  USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
+  WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
+CREATE POLICY "Authenticated admins only" ON public.audit_log
+  FOR ALL TO authenticated
+  USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
+  WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
 
 -- Enable Realtime
 ALTER PUBLICATION supabase_realtime ADD TABLE public.loan_records;
