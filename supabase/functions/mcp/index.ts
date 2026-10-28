@@ -71,21 +71,17 @@ type JsonRpcRequest = {
 };
 
 function jsonResponse(body: unknown, status = 200, origin = ''): Response {
-  const configuredOrigins = (Deno.env.get('MCP_ALLOWED_ORIGINS') ?? '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const originAllowed = Boolean(origin && configuredOrigins.includes(origin));
+  // This endpoint uses an explicit Bearer token and validates Supabase Auth + ADMIN
+  // server-side; it does not use browser cookies. Wildcard CORS permits hosted
+  // previews (including AI Studio) while authentication remains mandatory.
   const headers = new Headers({
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
     'vary': 'Origin',
+    'access-control-allow-origin': '*',
+    'access-control-allow-headers': 'authorization, content-type, mcp-protocol-version, apikey, x-client-info',
+    'access-control-allow-methods': 'POST, OPTIONS',
   });
-  if (originAllowed) {
-    headers.set('access-control-allow-origin', origin);
-    headers.set('access-control-allow-headers', 'authorization, content-type, mcp-protocol-version');
-    headers.set('access-control-allow-methods', 'POST, OPTIONS');
-  }
   return new Response(JSON.stringify(body), { status, headers });
 }
 
@@ -104,17 +100,13 @@ function textContent(value: unknown) {
 Deno.serve(async (request: Request) => {
   const origin = request.headers.get('origin') ?? '';
   if (request.method === 'OPTIONS') {
-    const configuredOrigins = (Deno.env.get('MCP_ALLOWED_ORIGINS') ?? '')
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
-    const headers = new Headers({ 'vary': 'Origin' });
-    if (origin && configuredOrigins.includes(origin)) {
-      headers.set('access-control-allow-origin', origin);
-      headers.set('access-control-allow-headers', 'authorization, content-type, mcp-protocol-version');
-      headers.set('access-control-allow-methods', 'POST, OPTIONS');
-      headers.set('access-control-max-age', '600');
-    }
+    const headers = new Headers({
+      'vary': 'Origin',
+      'access-control-allow-origin': '*',
+      'access-control-allow-headers': 'authorization, content-type, mcp-protocol-version, apikey, x-client-info',
+      'access-control-allow-methods': 'POST, OPTIONS',
+      'access-control-max-age': '600',
+    });
     return new Response(null, { status: 204, headers });
   }
   if (request.method !== 'POST') {
@@ -160,16 +152,12 @@ Deno.serve(async (request: Request) => {
     }), 200, origin);
   }
   if (rpc.method === 'notifications/initialized') {
-    const headers = new Headers({ 'vary': 'Origin' });
-    const configuredOrigins = (Deno.env.get('MCP_ALLOWED_ORIGINS') ?? '')
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
-    if (origin && configuredOrigins.includes(origin)) {
-      headers.set('access-control-allow-origin', origin);
-      headers.set('access-control-allow-headers', 'authorization, content-type, mcp-protocol-version');
-      headers.set('access-control-allow-methods', 'POST, OPTIONS');
-    }
+    const headers = new Headers({
+      'vary': 'Origin',
+      'access-control-allow-origin': '*',
+      'access-control-allow-headers': 'authorization, content-type, mcp-protocol-version, apikey, x-client-info',
+      'access-control-allow-methods': 'POST, OPTIONS',
+    });
     return new Response(null, { status: 202, headers });
   }
   if (rpc.method === 'ping') return jsonResponse(rpcResult(rpc.id, {}), 200, origin);
