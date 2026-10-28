@@ -18,6 +18,7 @@ import {
   SyncResult
 } from '../../lib/supabase';
 import { db } from '../../lib/db';
+import { Link } from 'react-router-dom';
 
 export function SupabaseDatabaseSection() {
   const config = getSupabaseConfig();
@@ -352,6 +353,20 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.state_targets;`;
               {isSyncing ? 'Syncing...' : 'Sync Now'}
             </Button>
           </div>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-2 rounded-xl border border-primary/20 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Supabase Auth required for secure cloud sync</p>
+            <p className="mt-1 text-xs text-muted-foreground">Your existing local app login does not create a Supabase Auth session. Sign in separately to enable authenticated sync and test MCP access.</p>
+          </div>
+          <Button asChild variant="outline" size="sm" className="shrink-0">
+            <Link to="/mcp-admin">
+              <ShieldCheck className="mr-1.5 h-4 w-4" />
+              Supabase Auth Login
+              <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
+            </Link>
+          </Button>
         </div>
 
         {/* Credentials Preview */}
