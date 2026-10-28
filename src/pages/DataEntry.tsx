@@ -6,6 +6,7 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { calculateRow } from '../lib/calculations';
+import { resolveCustomerName } from '../lib/fileParser';
 import { fmtCur } from '../lib/formatters';
 import { toast } from 'sonner';
 import { Search, X, Download } from 'lucide-react';
@@ -26,7 +27,15 @@ export default function DataEntry() {
     if (isExecutive() && user) data = data.filter(r => r.executive_name === user.name);
     if (search) {
       const s = search.toLowerCase();
-      data = data.filter(r => r.agreementid.toLowerCase().includes(s) || r.city?.toLowerCase().includes(s) || r.executive_name?.toLowerCase().includes(s));
+      data = data.filter(r => {
+        const cust = String(r.customer_name || resolveCustomerName(r) || '').toLowerCase();
+        return (
+          r.agreementid.toLowerCase().includes(s) ||
+          cust.includes(s) ||
+          r.city?.toLowerCase().includes(s) ||
+          r.executive_name?.toLowerCase().includes(s)
+        );
+      });
     }
     if (bucketFilter !== 'all') data = data.filter(r => String(r.bom_bkt) === bucketFilter);
     if (paidFilter !== 'all') {
@@ -130,7 +139,7 @@ export default function DataEntry() {
       const c = calculateRow(r);
       return {
         'Loan ID': r.agreementid,
-        'Customer Name': r.customer_name || '',
+        'Customer Name': r.customer_name || resolveCustomerName(r) || '',
         'City': r.city || '',
         'Executive Name': r.executive_name || '',
         'BOM Bkt': r.bom_bkt,
@@ -153,7 +162,20 @@ export default function DataEntry() {
   const lastCorrected = uploadHistory.find(u => u.type === 'CORRECTED_DAC_FILE');
 
   const columns = [
-    { key: 'agreementid', label: 'Agreement ID', width: '120px', render: (v: string) => <span className="text-muted-foreground">{v}</span> },
+    { key: 'agreementid', label: 'Agreement ID', width: '110px', render: (v: string) => <span className="text-muted-foreground font-mono">{v}</span> },
+    { 
+      key: 'customer_name', 
+      label: 'Customer Name', 
+      width: '150px', 
+      render: (_: string, row: any) => {
+        const name = row.customer_name || resolveCustomerName(row) || '-';
+        return (
+          <span className="font-semibold text-foreground truncate block max-w-[140px]" title={name}>
+            {name}
+          </span>
+        );
+      } 
+    },
     { key: 'bom_bkt', label: 'Bkt', width: '40px', render: (v: number) => <StatusBadge variant="bucket">{v}</StatusBadge> },
     { key: 'executive_name', label: 'Executive', width: '100px', hideBelow: 'sm' as const },
     { key: 'city', label: 'City', width: '80px', hideBelow: 'sm' as const },

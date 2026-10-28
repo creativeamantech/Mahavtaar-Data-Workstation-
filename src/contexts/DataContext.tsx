@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, ReactNode, useCallback, useEffect, useMemo } from 'react';
-import { parseMainFile, parsePaidFile, mergePaidIntoRecords, parseAdditionalFile, mergeAdditionalIntoRecords, parseCorrectedFile, mergeCorrectedIntoRecords } from '../lib/fileParser';
+import { parseMainFile, parsePaidFile, mergePaidIntoRecords, parseAdditionalFile, mergeAdditionalIntoRecords, parseCorrectedFile, mergeCorrectedIntoRecords, resolveCustomerName } from '../lib/fileParser';
 import { db, AuditEntry, UploadSession } from '../lib/db';
 import { useAuth } from './AuthContext';
 import { atomicFileImport, atomicUpdateLoanRecord, atomicBulkUpdateLoanRecords } from '../lib/repositories/loanRepository';
@@ -154,16 +154,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const loadMainFile = useCallback(async (buffer: ArrayBuffer, fileName: string, userName: string) => {
     const parsed = parseMainFile(buffer);
-    const entry = { id: crypto.randomUUID(), type: 'MAIN_DATA', fileName, recordCount: parsed.length, uploadedBy: userName, createdAt: new Date().toISOString() };
+    const normalizedRecords = parsed.map(record => {
+      const custName = record.customer_name || resolveCustomerName(record);
+      return {
+        ...record,
+        customer_name: custName,
+        'customer Name': custName,
+        'Customer Name': custName,
+        CUSTOMER_NAME: custName,
+      };
+    });
+    const entry = { id: crypto.randomUUID(), type: 'MAIN_DATA', fileName, recordCount: normalizedRecords.length, uploadedBy: userName, createdAt: new Date().toISOString() };
     setUploadHistory(prev => [entry, ...prev]);
     
-    await atomicFileImport(parsed, entry as UploadSession);
+    await atomicFileImport(normalizedRecords, entry as UploadSession);
     
     const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
     const dbRecords = await fetchAuthorizedLoanRecords(user);
     setRecords(dbRecords);
     
-    return { rowCount: parsed.length };
+    return { rowCount: normalizedRecords.length };
   }, [user]);
 
   const loadPaidFile = useCallback(async (buffer: ArrayBuffer, fileName: string, userName: string) => {

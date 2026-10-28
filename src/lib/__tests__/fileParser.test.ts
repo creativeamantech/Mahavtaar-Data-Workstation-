@@ -9,6 +9,7 @@ import {
   mergePaidIntoRecords,
   mergeAdditionalIntoRecords,
   mergeCorrectedIntoRecords,
+  resolveCustomerName,
 } from '../fileParser';
 
 describe('fileParser.ts - Multi-File Ingestion & Merge Invariants', () => {
@@ -140,6 +141,45 @@ describe('fileParser.ts - Multi-File Ingestion & Merge Invariants', () => {
       expect(parsed[0].executive_name).toBe('Rohan Das');
     });
 
+    it('parseMainFile detects customer name with exact header "customer Name"', () => {
+      const sampleRows = [
+        {
+          AGREEMENTID: 'CUST_NAME_01',
+          'customer Name': 'Pooja Agarwal',
+          State: 'DELHI',
+          City: 'DELHI',
+          bom_bkt: 2,
+          emi_amt: 4500,
+          principal_outstanding: 90000,
+          DAC: 4500,
+        },
+      ];
+      const buffer = createXlsbBuffer(sampleRows);
+      const parsed = parseMainFile(buffer);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].agreementid).toBe('CUST_NAME_01');
+      expect(parsed[0].customer_name).toBe('Pooja Agarwal');
+      expect(parsed[0]['customer Name']).toBe('Pooja Agarwal');
+    });
+
+    it('parseMainFile handles header offset with title banner and "customer Name"', () => {
+      const wb = XLSX.utils.book_new();
+      const wsData = [
+        ['BANK PORTFOLIO REPORT - CONFIDENTIAL'],
+        ['Generated at 2026-10-27'],
+        ['Agreement ID', 'customer Name', 'City', 'State', 'BOM Bucket', 'EMI Amount', 'POS'],
+        ['CUST_BANNER_01', 'Vikram Malhotra', 'NOIDA', 'UP', 1, 6000, 120000],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      XLSX.utils.book_append_sheet(wb, ws, 'Data');
+      const buffer = XLSX.write(wb, { bookType: 'xlsb', type: 'array' }) as ArrayBuffer;
+
+      const parsed = parseMainFile(buffer);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].agreementid).toBe('CUST_BANNER_01');
+      expect(parsed[0].customer_name).toBe('Vikram Malhotra');
+    });
+
     it('parsePaidFile parses .xlsb binary files correctly', () => {
       const sampleRows = [
         {
@@ -188,6 +228,91 @@ describe('fileParser.ts - Multi-File Ingestion & Merge Invariants', () => {
       expect(parsed).toHaveLength(1);
       expect(parsed[0].agreementid).toBe('XLSB_CORR_01');
       expect(parsed[0].corrected_dac).toBe(12000);
+    });
+  });
+
+  describe('Customer Name Ingestion & Fallback Logic', () => {
+    it('prioritizes standard "customer_name" key when present', () => {
+      const row = {
+        agreementid: 'AGR_01',
+        customer_name: 'Ananya Roy',
+        'customer Name': 'Fallback Roy',
+      };
+      expect(resolveCustomerName(row)).toBe('Ananya Roy');
+    });
+
+    it('does NOT take generic "name" as customer name, prioritizing "customer Name"', () => {
+      const row = {
+        agreementid: 'AGR_02',
+        name: 'Rohan Sharma (Executive)',
+        'customer Name': 'Amitabh Bachchan',
+      };
+      // Generic "name" must be ignored; "customer Name" must be taken
+      expect(resolveCustomerName(row)).toBe('Amitabh Bachchan');
+    });
+
+    it('returns empty string if only generic "name" or "NAME" is present without customer keys', () => {
+      expect(resolveCustomerName({ agreementid: 'AGR_02B', name: 'John Doe' })).toBe('');
+      expect(resolveCustomerName({ agreementid: 'AGR_02C', NAME: 'Jane Doe' })).toBe('');
+      expect(resolveCustomerName({ agreementid: 'AGR_02D', Name: 'Alice Smith' })).toBe('');
+    });
+
+    it('falls back to "customer Name" (exact match) if standard keys are not found', () => {
+      const row = {
+        agreementid: 'AGR_03',
+        'customer Name': 'Praveen Sharma',
+      };
+      expect(resolveCustomerName(row)).toBe('Praveen Sharma');
+    });
+
+    it('falls back to "customer Name" case-insensitively ("Customer Name", "CUSTOMER NAME", "customer name", "cUsToMeR nAmE")', () => {
+      expect(resolveCustomerName({ 'Customer Name': 'Ritu Verma' })).toBe('Ritu Verma');
+      expect(resolveCustomerName({ 'CUSTOMER NAME': 'Karan Johar' })).toBe('Karan Johar');
+      expect(resolveCustomerName({ 'customer name': 'Nisha Gupta' })).toBe('Nisha Gupta');
+      expect(resolveCustomerName({ 'cUsToMeR nAmE': 'Varun Dhawan' })).toBe('Varun Dhawan');
+    });
+
+    it('falls back to "customer Name" when standard "customer_name" is blank or whitespace', () => {
+      const row = {
+        agreementid: 'AGR_04',
+        customer_name: '   ',
+        'customer Name': 'Deepak Chopra',
+      };
+      expect(resolveCustomerName(row)).toBe('Deepak Chopra');
+    });
+
+    it('handles customer Name with surrounding whitespace in key name', () => {
+      const row = {
+        agreementid: 'AGR_06',
+        '  customer Name  ': 'Arun Jaitley',
+      };
+      expect(resolveCustomerName(row)).toBe('Arun Jaitley');
+    });
+
+    it('falls back to banking variants if customer Name is not found', () => {
+      expect(resolveCustomerName({ 'Cust Name': 'Sunil Gavaskar' })).toBe('Sunil Gavaskar');
+      expect(resolveCustomerName({ 'Borrower Name': 'Kapil Dev' })).toBe('Kapil Dev');
+      expect(resolveCustomerName({ 'Client Name': 'Rahul Dravid' })).toBe('Rahul Dravid');
+    });
+
+    it('full parseMainFile populates customer_name, customer Name, Customer Name from "customer Name" header in .xlsx', () => {
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet([
+        {
+          agreementid: 'AGR_FALLBACK_10',
+          'customer Name': 'Sanjay Singhania',
+          city: 'MUMBAI',
+          bom_bkt: 1,
+        },
+      ]);
+      XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+      const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
+
+      const parsed = parseMainFile(buffer);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].customer_name).toBe('Sanjay Singhania');
+      expect(parsed[0]['customer Name']).toBe('Sanjay Singhania');
+      expect(parsed[0]['Customer Name']).toBe('Sanjay Singhania');
     });
   });
 });

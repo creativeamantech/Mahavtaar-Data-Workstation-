@@ -31,7 +31,7 @@ import { MultiCaseModal } from '../components/explorer/MultiCaseModal';
 
 const STANDARD_KEYS = [
   "agreementid", "agreement_no", "AGREEMENTID", "AGREEMENTNO", "AGREEMENT_NO", "Agreement No", "loan_id", "Loan ID",
-  "customer_name", "CUSTOMERNAME", "Customer Name", "CUSTOMER_NAME", "customername",
+  "customer_name", "CUSTOMERNAME", "Customer Name", "customer Name", "CUSTOMER NAME", "CUSTOMER_NAME", "customername", "Cust Name", "Borrower Name",
   "bom_bkt",
   "state", "State",
   "city", "City",
