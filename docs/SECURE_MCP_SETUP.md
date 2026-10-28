@@ -2,15 +2,18 @@
 
 The repository contains an authenticated, read-only MCP-over-HTTP Edge Function at `supabase/functions/mcp/index.ts` and a separate browser admin page at `/mcp-admin` (`src/pages/McpAdmin.tsx`). The admin page uses Supabase Auth and does not change the existing local IndexedDB login.
 
-## Verified project state (2026-10-28)
+## Verified live project state (2026-10-28)
 
-- Supabase project: `Mahavtaar Ledger` (`ycyxlldgserhtaepzhll`), status `ACTIVE_HEALTHY`.
+- Supabase project: `Mahavtaar Ledger` (`ycyxlldgserhtaepzhll`), status previously verified `ACTIVE_HEALTHY`.
 - The live `public` schema currently has no tables.
-- No Edge Functions are currently deployed to the project.
-- Supabase Security Advisor reports that `public.rls_auto_enable()` is a SECURITY DEFINER event-trigger function executable by `anon` and `authenticated`. Read-only inspection confirms it enables RLS on newly created tables in `public`, uses `search_path = pg_catalog`, and catches/logs failures. Its execution grant to public client roles is still unnecessary risk; review/revoke those grants without changing the function's owner/event-trigger behavior, then re-run the advisor: https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable
-- GitHub Actions CI for the MCP admin page, route, and CORS changes passed: https://github.com/creativeamantech/Mahavtaar-Data-Workstation-/actions
+- MCP Edge Function `mcp` is deployed and `ACTIVE` (version 1); gateway JWT verification is enabled.
+- The migration `revoke_public_rls_trigger_execute` is recorded in the live migration history.
+- Security Advisor currently reports no findings.
+- GitHub Actions CI for the MCP admin page, route, and CORS changes passed: https://github.com/creativeamantech/Mahavtaar-Data-Workstation-/actions/runs/40566295963
 
-These findings are observations only. This work has not deployed the Edge Function, changed database schema, or modified the live project.
+## Remaining activation blockers
+
+The MCP endpoint is deployed, but end-to-end operation is not yet verified. Required Edge Function secrets and a separate Supabase Auth admin account have not been verified as configured. The available integration tools do not expose an Edge Function secrets-management or Auth user provisioning action, so those steps must be completed through a trusted Supabase admin process.
 
 ## Required server-side configuration
 
@@ -19,7 +22,7 @@ Configure these Supabase Edge Function secrets; never add service-role credentia
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `MCP_ALLOWED_ORIGINS` (comma-separated exact origins for browser clients; use the exact deployed app origin)
+- `MCP_ALLOWED_ORIGINS` (comma-separated exact origins for browser clients; use the exact deployed workstation app origin)
 
 The endpoint verifies the bearer token with Supabase Auth and permits calls only when the authenticated user's server-controlled `app_metadata.role` is `ADMIN`. Do not use `user_metadata.role` for authorization. The admin page's login uses Supabase Auth email/password; it does not create accounts or assign roles.
 
@@ -29,15 +32,16 @@ The endpoint verifies the bearer token with Supabase Auth and permits calls only
 - `list_tables`: checks the approved workstation tables and row counts.
 - `search_loan_records`: read-only agreement-ID search, maximum 25 rows.
 
-The endpoint does not create tables or mutate customer data. Since the live project has no public tables and no deployed Edge Function, MCP is not operational yet. The workstation's current app login is local IndexedDB authentication and does not issue a Supabase Auth JWT. A separate Supabase Auth admin account with server-managed `app_metadata.role = ADMIN` is required.
+The endpoint does not create tables or mutate customer data. Since the live project has no public tables, data tools will not be usable until the intended schema and access policies are reviewed and created.
 
 ## Safe activation order
 
 1. Review the intended database schema and row-level security policies. Do not create production tables blindly; the local-first application remains the primary store for now.
-2. Review the existing `public.rls_auto_enable()` function and its event-trigger association. A least-privilege migration is prepared at `supabase/migrations/20261028000000_revoke_public_rls_trigger_execute.sql`; it revokes direct `EXECUTE` from `PUBLIC`, `anon`, and `authenticated` without changing the function definition or event-trigger association. It is committed but has **not** been applied to the live database. Apply only after final review, then rerun Security Advisor.
-3. Create/provision a Supabase Auth admin identity through a trusted admin process and set `app_metadata.role = ADMIN` server-side. Never set this role from the browser or `user_metadata`.
-4. Configure the Edge Function secrets and exact `MCP_ALLOWED_ORIGINS` value.
-5. Deploy the MCP function, then test sign-in and `tools/list` from `/mcp-admin`. Only test data tools after the reviewed tables exist and contain approved test data.
+2. Create/provision a Supabase Auth admin identity through a trusted admin process and set `app_metadata.role = ADMIN` server-side. Never set this role from the browser or `user_metadata`.
+3. Configure the Edge Function secrets listed above.
+4. Confirm the workstation app's exact deployed origin and include it in `MCP_ALLOWED_ORIGINS`.
+5. Open `/mcp-admin`, sign in with the separate Supabase Auth admin account, and verify that the endpoint returns `get_status`, `list_tables`, and `search_loan_records` in `tools/list`.
+6. Only test data tools after the reviewed tables exist and contain approved test data.
 
 ## Local-first sync scope
 
@@ -45,4 +49,4 @@ The current sync transport is same-origin browser-tab notification only. It broa
 
 The current local device identity's `publicKeyFingerprint` is a random label, not a fingerprint derived from a cryptographic public key. Peer IDs and this label must not be treated as proof of identity for remote authorization. Because the intended initial use is one Android device, cross-device peer enrollment, cryptographic device identity, and relay are deferred until multi-device sync is a real requirement.
 
-Do not deploy a relay or apply database migrations without a final schema and access-policy review. The prepared permissions migration is not live until explicitly applied.
+Do not create production tables or enable data tools without a final schema and access-policy review.
