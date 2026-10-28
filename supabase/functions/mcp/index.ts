@@ -48,7 +48,7 @@ async function getDynamicSchema(serviceRoleKey: string): Promise<Record<string, 
   const schema: Record<string, string[]> = {};
 
   for (const [path, definition] of Object.entries(spec.paths ?? {})) {
-    const table = path.replace(/^\\//, '').split('/')[0];
+    const table = (path.startsWith('/') ? path.slice(1) : path).split('/')[0];
     if (!allowed.has(table) || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table)) continue;
     const properties = definition.get?.responses?.['200']?.schema?.items?.properties
       ?? definition.get?.responses?.['200']?.schema?.properties
