@@ -23,16 +23,17 @@ Configure these Supabase Edge Function secrets; never add service-role credentia
 - `SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `MCP_ALLOWED_ORIGINS` (comma-separated exact origins for browser clients; use the exact deployed workstation app origin)
+- Optional `MCP_ALLOWED_TABLES` (comma-separated table names; defaults to the six reviewed workstation table names in the function)
 
 The endpoint verifies the bearer token with Supabase Auth and permits calls only when the authenticated user's server-controlled `app_metadata.role` is `ADMIN`. Do not use `user_metadata.role` for authorization. The admin page's login uses Supabase Auth email/password; it does not create accounts or assign roles.
 
 ## Current tools
 
 - `get_status`: authenticated status and access mode.
-- `list_tables`: checks the approved workstation tables and row counts.
-- `search_loan_records`: read-only agreement-ID search, maximum 25 rows.
+- `list_tables`: discovers current columns dynamically through the Supabase PostgREST OpenAPI schema, then reports existence and row counts only for allowlisted tables.
+- `search_loan_records`: read-only agreement-ID search, maximum 25 rows; discovers the available identifier column from the current schema instead of assuming one fixed column layout.
 
-The endpoint does not create tables or mutate customer data. Since the live project has no public tables, data tools will not be usable until the intended schema and access policies are reviewed and created.
+The endpoint does not create tables or mutate customer data. Schema discovery is dynamic, but table access is not unrestricted: only the default allowlist or names explicitly set in the server-only `MCP_ALLOWED_TABLES` secret are considered. Since the live project has no public tables, data tools will not return records until the intended schema and access policies are reviewed and created.
 
 ## Safe activation order
 
