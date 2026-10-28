@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - feat/local-first-secure-sync-mcp
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Synchronize dependency lockfile
+        run: npm install --package-lock-only --ignore-scripts
+      - name: Install dependencies
+        run: npm ci
+      - name: Production build
+        run: npm run build
+      - name: Unit tests
+        run: npm test
+      - name: Lint
+        run: npm run lint

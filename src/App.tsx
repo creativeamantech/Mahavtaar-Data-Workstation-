@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { DataProvider } from "./contexts/DataContext";
 import { SyncProvider } from "./contexts/SyncContext";
 import Login from "./pages/Login";
+import McpAdmin from "./pages/McpAdmin";
 import Dashboard from "./pages/Dashboard";
 import ExecDashboard from "./pages/ExecDashboard";
 import ExecTeamPerf from "./pages/ExecTeamPerf";
@@ -39,6 +40,7 @@ function AppRoutes() {
   const { user } = useAuth();
   return (
     <Routes>
+      <Route path="/mcp-admin" element={<McpAdmin />} />
       <Route path="/login" element={user ? <Navigate to={user.role === "EXECUTIVE" ? "/exec-dashboard" : "/dashboard"} replace /> : <Login />} />
       <Route path="/dashboard" element={<ProtectedRoute view={VIEWS.DASHBOARD}><Dashboard /></ProtectedRoute>} />
       <Route path="/exec-dashboard" element={<ProtectedRoute view={VIEWS.EXEC_DASHBOARD}><ExecDashboard /></ProtectedRoute>} />

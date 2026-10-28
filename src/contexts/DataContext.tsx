@@ -4,6 +4,7 @@ import { db, AuditEntry, UploadSession } from '../lib/db';
 import { useAuth } from './AuthContext';
 import { atomicFileImport, atomicUpdateLoanRecord, atomicBulkUpdateLoanRecords } from '../lib/repositories/loanRepository';
 import { setTargetRecord, deleteTargetRecord } from '../lib/repositories/targetRepository';
+import { SyncEngine } from '../lib/sync/SyncEngine';
 
 interface DataContextType {
   isLoading: boolean;
@@ -60,6 +61,46 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setSchema([]);
     }
   }, [records]);
+
+  // Start local-first journal transport while a user session is active.
+  // This transport is same-origin tabs only; it does not provide internet relay.
+  useEffect(() => {
+    if (!user) return;
+
+    let active = true;
+    const refreshFromLocalDb = async () => {
+      if (!active) return;
+      try {
+        const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
+        const [dbRecords, dbTargets, dbUploads, dbAudit] = await Promise.all([
+          fetchAuthorizedLoanRecords(user),
+          db.state_targets.toArray(),
+          db.upload_sessions.orderBy('createdAt').reverse().toArray(),
+          db.audit_log.orderBy('createdAt').reverse().toArray(),
+        ]);
+        if (!active) return;
+        setRecords(dbRecords);
+        setTargets(dbTargets.reduce((acc, target) => {
+          acc[target.key] = target.pct;
+          return acc;
+        }, {} as Record<string, number>));
+        setUploadHistory(dbUploads);
+        setAuditLog(dbAudit);
+      } catch (error) {
+        console.error('[DataContext] failed to refresh after sync', error);
+      }
+    };
+
+    const engine = new SyncEngine(() => { void refreshFromLocalDb(); });
+    void engine.start().catch(error => {
+      console.error('[DataContext] sync engine failed to start', error);
+    });
+
+    return () => {
+      active = false;
+      void engine.stop();
+    };
+  }, [user]);
 
   // Load from Dexie on mount
   useEffect(() => {

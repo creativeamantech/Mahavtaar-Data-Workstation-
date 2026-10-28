@@ -143,14 +143,20 @@ ALTER TABLE public.state_targets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.upload_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
 
--- Allow public access for anon role (authenticated and anon clients via key)
-CREATE POLICY "Allow public read-write for loan_records" ON public.loan_records FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write for customer_feedbacks" ON public.customer_feedbacks FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write for users" ON public.users FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write for attendance_logs" ON public.attendance_logs FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write for state_targets" ON public.state_targets FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write for upload_sessions" ON public.upload_sessions FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write for audit_log" ON public.audit_log FOR ALL USING (true) WITH CHECK (true);
+-- Fail closed: do not expose customer/loan data to browser anon/authenticated roles.
+-- The app currently uses local application credentials rather than Supabase Auth,
+-- so safe per-user RLS policies cannot be defined here yet. Add authenticated server-side
+-- API/MCP access and explicit identity/role mapping before granting client access.
+DROP POLICY IF EXISTS "Allow public read-write for loan_records" ON public.loan_records;
+DROP POLICY IF EXISTS "Allow public read-write for customer_feedbacks" ON public.customer_feedbacks;
+DROP POLICY IF EXISTS "Allow public read-write for users" ON public.users;
+DROP POLICY IF EXISTS "Allow public read-write for attendance_logs" ON public.attendance_logs;
+DROP POLICY IF EXISTS "Allow public read-write for state_targets" ON public.state_targets;
+DROP POLICY IF EXISTS "Allow public read-write for upload_sessions" ON public.upload_sessions;
+DROP POLICY IF EXISTS "Allow public read-write for audit_log" ON public.audit_log;
+
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM PUBLIC, anon, authenticated;
+REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
 
 -- Enable Realtime for live collaboration across nodes
 ALTER PUBLICATION supabase_realtime ADD TABLE public.loan_records;
