@@ -196,11 +196,8 @@ export async function fetchSupabaseTableCounts(): Promise<Record<string, number>
           .from(table)
           .select('*', { count: 'exact', head: true });
 
-        if (!error && count !== null) {
-          counts[table] = count;
-        } else {
-          counts[table] = 0;
-        }
+        // Omit inaccessible tables instead of reporting a false zero count.
+        if (!error && count !== null) counts[table] = count;
       } catch {
         counts[table] = 0;
       }
