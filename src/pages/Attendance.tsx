@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { AppLayout } from '../components/layout/AppLayout';
 import { DataTable } from '../components/ui/DataTable';
 import { format, parseISO, differenceInMinutes, subDays, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
@@ -14,6 +14,9 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { DateRange } from 'react-day-picker';
 import Papa from 'papaparse';
 import { ShiftAttendanceCard } from '../components/attendance/ShiftAttendanceCard';
+import { getAllAttendance } from '../lib/repositories/attendanceRepository';
+import { isCloudFirstEnabled } from '../lib/cloudRepository';
+import { toast } from 'sonner';
 
 interface AttendanceRecord {
   id: string;
@@ -27,7 +30,16 @@ interface AttendanceRecord {
 }
 
 export default function Attendance() {
-  const records = useLiveQuery(() => db.attendance_logs.toArray()) || [];
+  const localRecords = useLiveQuery(() => isCloudFirstEnabled() ? Promise.resolve([]) : db.attendance_logs.toArray()) || [];
+  const [cloudRecords, setCloudRecords] = useState<AttendanceRecord[]>([]);
+  useEffect(() => {
+    if (!isCloudFirstEnabled()) return;
+    let active = true;
+    getAllAttendance().then(rows => { if (active) setCloudRecords(rows); })
+      .catch(error => { if (active) toast.error(error instanceof Error ? error.message : 'Unable to load cloud attendance.'); });
+    return () => { active = false; };
+  }, []);
+  const records = isCloudFirstEnabled() ? cloudRecords : localRecords;
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [searchAgent, setSearchAgent] = useState('');
 
