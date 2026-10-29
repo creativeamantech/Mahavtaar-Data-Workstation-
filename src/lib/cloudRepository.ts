@@ -190,6 +190,22 @@ export async function cloudFetchAttendance(): Promise<import('./db').AttendanceL
   return result as import('./db').AttendanceLog[];
 }
 
+export async function cloudPunchIn(row: import('./db').AttendanceLog): Promise<import('./db').AttendanceLog> {
+  const { client, user } = await requireSignedInClient();
+  if (row.userId !== user.id && user.app_metadata?.role !== 'ADMIN' && user.app_metadata?.role !== 'MANAGER') {
+    throw new Error('You may only punch in for your own attendance record.');
+  }
+  const { data, error } = await client.rpc('cloud_punch_in', {
+    p_user_id: row.userId,
+    p_user_name: row.userName,
+    p_date: row.date,
+    p_login_time: row.loginTime,
+  });
+  if (error) throw new Error('Cloud attendance punch-in failed: ' + error.message);
+  if (!data || typeof data !== 'object') throw new Error('Cloud attendance punch-in returned no record.');
+  return data as import('./db').AttendanceLog;
+}
+
 export async function cloudSaveAttendance(row: import('./db').AttendanceLog): Promise<import('./db').AttendanceLog> {
   const { client, user } = await requireSignedInClient();
   if (row.userId !== user.id && user.app_metadata?.role !== 'ADMIN' && user.app_metadata?.role !== 'MANAGER') {
