@@ -11,7 +11,7 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 - `src/contexts/SyncContext.tsx` and the peer sync engine implement local/peer synchronization. This is separate from Supabase and must not be mistaken for cloud persistence.
 - `src/lib/supabase.ts` currently provides a manual push/pull bridge, not a cloud-first repository layer. The sync operation requires a Supabase Auth session and a server-managed `app_metadata.role = ADMIN`.
 - The Supabase admin diagnostics page at `/mcp-admin` uses Supabase Auth, but the main login page does not. These are currently separate authentication systems.
-- Supabase tables exist, but the last database inspection found zero rows in the seven application tables. No migration of local IndexedDB data has been confirmed.
+- Supabase tables exist, but the last database inspection found zero rows in the seven application tables. No migration of local IndexedDB data has been confirmed. Role-based RLS policies have since been applied; no data was deleted or migrated.
 - RLS is administrator-only. It is not yet a complete policy model for executives, staff attendance, row-level portfolio assignments, or user profile reads.
 
 ## Non-negotiable safety constraints
