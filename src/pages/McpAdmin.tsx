@@ -24,22 +24,45 @@ export default function McpAdmin() {
   }
 
   async function runProbe(accessToken: string) {
-    const response = await fetch(`${config.url}/functions/v1/mcp`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${accessToken}`,
-        "mcp-protocol-version": "2025-03-26",
-      },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok || body.error) {
-      throw new Error(body.error?.message || body.error || `MCP returned HTTP ${response.status}`);
-    }
-    const tools = body.result?.tools;
+    const endpoint = `${config.url}/functions/v1/mcp`;
+    const callMcp = async (payload: Record<string, unknown>) => {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${accessToken}`,
+          "mcp-protocol-version": "2025-03-26",
+        },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.error) {
+        throw new Error(body.error?.message || body.error || `MCP returned HTTP ${response.status}`);
+      }
+      return body;
+    };
+
+    const toolsBody = await callMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const tools = toolsBody.result?.tools;
     if (!Array.isArray(tools)) throw new Error("MCP response did not include a tools list.");
-    return tools.map((tool: { name?: string }) => String(tool.name || "Unnamed tool")).join(", ");
+
+    const tablesBody = await callMcp({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "list_tables", arguments: {} },
+    });
+    const text = tablesBody.result?.content?.find((item: { type?: string; text?: string }) => item.type === "text")?.text;
+    if (!text) throw new Error("MCP list_tables returned no table report.");
+    const report = JSON.parse(text) as { tables?: Record<string, { exists?: boolean; rowCount?: number | null }> };
+    const tableEntries = Object.entries(report.tables ?? {});
+    if (!tableEntries.length) throw new Error("MCP list_tables did not return table metadata.");
+    const missing = tableEntries.filter(([, table]) => !table.exists).map(([name]) => name);
+    if (missing.length) throw new Error(`MCP connected, but tables are unavailable: ${missing.join(", ")}`);
+    return {
+      tools: tools.map((tool: { name?: string }) => String(tool.name || "Unnamed tool")).join(", "),
+      tables: tableEntries.map(([name, table]) => `${name}: ${table.rowCount ?? "unknown"} rows`).join("; "),
+    };
   }
 
   async function handleLogin(event: FormEvent) {
@@ -56,8 +79,19 @@ export default function McpAdmin() {
       setSessionEmail(data.user.email || email.trim());
       const token = data.session.access_token;
       try {
-        const toolNames = await runProbe(token);
-        setResults([{ label: "Supabase Auth", ok: true, detail: `Signed in as ${data.user.email || email.trim()}` }, { label: "MCP endpoint", ok: true, detail: `Authenticated. Tools: ${toolNames}` }]);
+        const dbTables = ["loan_records", "customer_feedbacks", "users", "attendance_logs", "state_targets", "upload_sessions", "audit_log"];
+        const dbChecks = await Promise.all(dbTables.map(async (table) => {
+          const { count, error: tableError } = await client.from(table).select("*", { count: "exact", head: true });
+          return { table, count, error: tableError };
+        }));
+        const failedTables = dbChecks.filter(check => check.error).map(check => `${check.table}: ${check.error?.message}`);
+        if (failedTables.length) throw new Error(`Supabase database access failed: ${failedTables.join("; ")}`);
+        const mcp = await runProbe(token);
+        setResults([
+          { label: "Supabase Auth", ok: true, detail: `Signed in as ${data.user.email || email.trim()}` },
+          { label: "Supabase database / RLS", ok: true, detail: dbChecks.map(check => `${check.table}: ${check.count ?? 0} rows`).join("; ") },
+          { label: "MCP endpoint + table probe", ok: true, detail: `Authenticated. Tools: ${mcp.tools}. Tables: ${mcp.tables}` },
+        ]);
       } catch (probeError) {
         setResults([{ label: "Supabase Auth", ok: true, detail: `Signed in as ${data.user.email || email.trim()}` }, { label: "MCP endpoint", ok: false, detail: probeError instanceof Error ? probeError.message : "MCP check failed." }]);
       }
