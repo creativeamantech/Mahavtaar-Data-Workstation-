@@ -99,3 +99,10 @@ Do not switch the live app to cloud-first until Phase 1 and Phase 2 are complete
 - Remaining blockers are unchanged: finish the full IndexedDB/direct-storage call-site audit, deploy and test trusted admin provisioning with an explicit `ADMIN_USERS_ALLOWED_ORIGINS` allowlist, implement a dry-run/backup/reconciliation migration workflow, complete role-based end-to-end tests, and enable leaked-password protection in Supabase Auth.
 
 - Additional static audit finding: in cloud-first mode, `AuthContext` starts `users` as an empty array and does not hydrate a cloud staff directory. The Assignment screen builds its executive selector from this array plus executive names already present on loan rows, so newly provisioned executives may not appear until a trusted cloud directory endpoint is implemented. Do not populate this list from untrusted `user_metadata` or expose `public.users` to every role just to fix the selector. The approved follow-up is a server-side, role-checked directory endpoint and UI integration, with tests for which roles can see which staff fields.
+
+
+## Cloud staff directory endpoint (2026-10-29)
+
+- Added `supabase/functions/staff-directory/index.ts`: it validates the caller's Supabase Auth token, permits only trusted `app_metadata.role` ADMIN or MANAGER, and returns a minimal staff directory (ID, name, role, assigned executive name) for active MANAGER/EXECUTIVE accounts. It does not return emails, password data, or arbitrary metadata.
+- Cloud `AuthContext` now invokes `staff-directory` for ADMIN/MANAGER sessions and hydrates the `users` state used by Assignment selectors. EXECUTIVE/VIEWER sessions clear the staff list. If the endpoint is unavailable, sign-in continues and the UI logs a warning; existing loan-row executive names remain as a fallback.
+- **Not deployed or runtime-tested.** Before deploying, set `STAFF_DIRECTORY_ALLOWED_ORIGINS` to the exact production app origin(s) (or configure `ADMIN_USERS_ALLOWED_ORIGINS` as the fallback), review Edge Function secrets and deployment settings, then test ADMIN/MANAGER success and EXECUTIVE/VIEWER denial with real sessions. Do not expose the service-role key to the client.
