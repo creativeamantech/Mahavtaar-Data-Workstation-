@@ -97,3 +97,13 @@ A dry-run must be read-only. The commit step must require an explicit administra
 - The change prevents these repository methods from silently stopping at the Supabase per-response row limit. It does not make attendance punch-in atomic; concurrent punch-ins still require a server-side uniqueness/transaction strategy.
 - A CI run for this exact commit was not returned by the available PR-run lookup at the time of this update. Do not treat the earlier successful CI run as validation of this commit.
 - Existing hard release gates remain unchanged: authenticated role-based RLS tests, migration dry-run/reconciliation, IndexedDB audit, atomic loan-plus-audit writes, Edge Function deployment/origin configuration, and leaked-password protection remain outstanding.
+
+
+## Follow-up verification (2026-10-29, atomic mutations)
+
+- Added migration `202610290002_cloud_first_atomic_operations.sql` (source commit `45b5c8e0df3f2db3611dbb212ee128dbb7ca94f1`) and applied it to Supabase project `ycyxlldgserhtaepzhll`. The migration ledger confirms it as `cloud_first_atomic_operations`.
+- Verified the database exposes `cloud_apply_loan_changes(jsonb, jsonb)` and `cloud_punch_in(text, text, text, text)`; both are SECURITY INVOKER (not SECURITY DEFINER). Loan rows and audit entries are written in one transaction; if any write fails, the RPC call rolls back. Batch size is capped at 5,000 loan rows / 50,000 audit rows.
+- Client loan update and bulk-update paths now use the atomic RPC instead of separately writing loan rows and audit entries. Cloud attendance punch-in now uses a database RPC with deterministic ID and `ON CONFLICT DO NOTHING`, returning the existing row if concurrent requests race.
+- CI run #107 passed for the initial client integration commit `8df87fc1d74a31ec752bd16ccced4ac7c5338c28`. CI run #109 is running for migration commit `45b5c8e0df3f2db3611dbb212ee128dbb7ca94f1`; wait for the final result before calling the exact head validated.
+- The security advisor still reports leaked-password protection disabled. Enable it in Supabase Dashboard before production use.
+- This does not complete release readiness: no authenticated role-based E2E evidence, no full repository-wide IndexedDB call-site audit, no migration dry-run/reconciliation exercise, and no final production origin for `admin-users` / `staff-directory` have been recorded. Cloud-first remains opt-in and must stay disabled until those gates pass.
