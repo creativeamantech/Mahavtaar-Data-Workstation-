@@ -83,8 +83,18 @@ begin
     raise exception 'You may only punch in for your own account';
   end if;
 
-  insert into public.attendance_logs (id, "userId", "userName", date, "loginTime", "breakDuration")
-  values (v_id, p_user_id, p_user_name, p_date, p_login_time, 0)
+  insert into public.attendance_logs
+  select (jsonb_populate_record(
+    null::public.attendance_logs,
+    jsonb_build_object(
+      'id', v_id,
+      'userId', p_user_id,
+      'userName', p_user_name,
+      'date', p_date,
+      'loginTime', p_login_time,
+      'breakDuration', 0
+    )
+  )).*
   on conflict (id) do nothing;
 
   select * into v_row from public.attendance_logs where id = v_id;
