@@ -7,6 +7,7 @@ import { db, CustomerFeedback } from '../db';
 import { incrementLamportClock } from '../sync/journal';
 import { getLocalDeviceIdentity } from '../sync/deviceIdentity';
 import { ValidationError } from '../errors';
+import { cloudFetchFeedbacks, cloudSaveFeedback, isCloudFirstEnabled } from '../cloudRepository';
 
 export interface FeedbackMutationContext {
   actorUserId?: string;
@@ -15,10 +16,12 @@ export interface FeedbackMutationContext {
 }
 
 export async function getFeedbackByAgreementId(agreementid: string): Promise<CustomerFeedback[]> {
+  if (isCloudFirstEnabled()) return (await cloudFetchFeedbacks()).filter(row => row.agreementid === agreementid);
   return await db.customer_feedbacks.where('agreementid').equals(agreementid).reverse().sortBy('createdAt');
 }
 
 export async function getAllFeedbacks(): Promise<CustomerFeedback[]> {
+  if (isCloudFirstEnabled()) return await cloudFetchFeedbacks();
   return await db.customer_feedbacks.reverse().sortBy('createdAt');
 }
 
@@ -38,6 +41,8 @@ export async function submitCustomerFeedback(
     id: feedbackId,
     createdAt: timestamp,
   };
+
+  if (isCloudFirstEnabled()) return await cloudSaveFeedback(record);
 
   await db.transaction('rw', [db.customer_feedbacks, db.audit_log, db.sync_journal], async () => {
     await db.customer_feedbacks.put(record);
