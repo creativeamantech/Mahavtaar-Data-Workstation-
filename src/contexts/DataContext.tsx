@@ -374,66 +374,76 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const undo = useCallback(async () => {
     if (undoStack.length === 0) return;
     const action = undoStack[undoStack.length - 1];
-    setUndoStack(prev => prev.slice(0, -1));
-    setRedoStack(prev => [...prev, action]);
-
-    const updateMap = new Map();
+    const updateMap = new Map<string, Record<string, unknown>>();
     action.audits.forEach(a => {
       if (!updateMap.has(a.agreementid)) updateMap.set(a.agreementid, {});
-      updateMap.get(a.agreementid)[a.field] = a.oldValue;
-      updateMap.get(a.agreementid)[`${a.field}_source`] = 'UNDO'; // Mark as undone
+      updateMap.get(a.agreementid)![a.field] = a.oldValue;
+      updateMap.get(a.agreementid)![`${a.field}_source`] = 'UNDO';
     });
 
-    setRecords(prev => {
-      return prev.map(r => {
-        if (updateMap.has(r.agreementid)) {
-          const u = updateMap.get(r.agreementid);
-          return { ...r, ...u };
+    try {
+      if (updateMap.size > 0) {
+        const formattedUpdates = Array.from(updateMap.entries()).map(([agreementId, updates]) => ({
+          agreementId,
+          updates,
+        }));
+        if (isCloudFirstEnabled()) {
+          await cloudBulkUpdateLoans(formattedUpdates, user?.name || 'Unknown');
+        } else {
+          await atomicBulkUpdateLoanRecords(formattedUpdates, {
+            userName: user?.name || 'Unknown',
+            userRole: user?.role || 'VIEWER',
+            source: 'MANUAL',
+          });
         }
-        return r;
-      });
-    });
-
-    if (updateMap.size > 0) {
-      const formattedUpdates = Array.from(updateMap.entries()).map(([agreementId, upds]) => ({
-        agreementId,
-        updates: upds
+      }
+      // Only update the UI/history after persistence succeeds.
+      setRecords(prev => prev.map(row => {
+        const updates = updateMap.get(row.agreementid);
+        return updates ? { ...row, ...updates } : row;
       }));
-      if (isCloudFirstEnabled()) await cloudBulkUpdateLoans(formattedUpdates, user?.name || 'Unknown');
-      else await atomicBulkUpdateLoanRecords(formattedUpdates, { userName: user?.name || 'Unknown', userRole: user?.role || 'VIEWER', source: 'MANUAL' });
+      setUndoStack(prev => prev.slice(0, -1));
+      setRedoStack(prev => [...prev, action]);
+    } catch (error) {
+      toast.error(error instanceof Error ? `Undo failed: ${error.message}` : 'Undo failed. No changes were applied in the UI.');
     }
   }, [undoStack, user]);
 
   const redo = useCallback(async () => {
     if (redoStack.length === 0) return;
     const action = redoStack[redoStack.length - 1];
-    setRedoStack(prev => prev.slice(0, -1));
-    setUndoStack(prev => [...prev, action]);
-
-    const updateMap = new Map();
+    const updateMap = new Map<string, Record<string, unknown>>();
     action.audits.forEach(a => {
       if (!updateMap.has(a.agreementid)) updateMap.set(a.agreementid, {});
-      updateMap.get(a.agreementid)[a.field] = a.newValue;
-      updateMap.get(a.agreementid)[`${a.field}_source`] = 'MANUAL'; // Restore manual source
+      updateMap.get(a.agreementid)![a.field] = a.newValue;
+      updateMap.get(a.agreementid)![`${a.field}_source`] = 'MANUAL';
     });
 
-    setRecords(prev => {
-      return prev.map(r => {
-        if (updateMap.has(r.agreementid)) {
-          const u = updateMap.get(r.agreementid);
-          return { ...r, ...u };
+    try {
+      if (updateMap.size > 0) {
+        const formattedUpdates = Array.from(updateMap.entries()).map(([agreementId, updates]) => ({
+          agreementId,
+          updates,
+        }));
+        if (isCloudFirstEnabled()) {
+          await cloudBulkUpdateLoans(formattedUpdates, user?.name || 'Unknown');
+        } else {
+          await atomicBulkUpdateLoanRecords(formattedUpdates, {
+            userName: user?.name || 'Unknown',
+            userRole: user?.role || 'VIEWER',
+            source: 'MANUAL',
+          });
         }
-        return r;
-      });
-    });
-
-    if (updateMap.size > 0) {
-      const formattedUpdates = Array.from(updateMap.entries()).map(([agreementId, upds]) => ({
-        agreementId,
-        updates: upds
+      }
+      // Only update the UI/history after persistence succeeds.
+      setRecords(prev => prev.map(row => {
+        const updates = updateMap.get(row.agreementid);
+        return updates ? { ...row, ...updates } : row;
       }));
-      if (isCloudFirstEnabled()) await cloudBulkUpdateLoans(formattedUpdates, user?.name || 'Unknown');
-      else await atomicBulkUpdateLoanRecords(formattedUpdates, { userName: user?.name || 'Unknown', userRole: user?.role || 'VIEWER', source: 'MANUAL' });
+      setRedoStack(prev => prev.slice(0, -1));
+      setUndoStack(prev => [...prev, action]);
+    } catch (error) {
+      toast.error(error instanceof Error ? `Redo failed: ${error.message}` : 'Redo failed. No changes were applied in the UI.');
     }
   }, [redoStack, user]);
 
