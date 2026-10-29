@@ -172,9 +172,22 @@ export function isCloudFirstEnabled(): boolean {
 
 export async function cloudFetchAttendance(): Promise<import('./db').AttendanceLog[]> {
   const { client } = await requireSignedInClient();
-  const { data, error } = await client.from('attendance_logs').select('*').order('date', { ascending: false });
-  if (error) throw new Error('Unable to load cloud attendance: ' + error.message);
-  return (data ?? []) as import('./db').AttendanceLog[];
+  const result: Record<string, any>[] = [];
+  // Supabase applies a maximum row limit per response. Page explicitly so attendance
+  // history does not silently truncate once it exceeds that limit.
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await client
+      .from('attendance_logs')
+      .select('*')
+      .order('date', { ascending: false })
+      .order('id', { ascending: true })
+      .range(offset, offset + 999);
+    if (error) throw new Error('Unable to load cloud attendance: ' + error.message);
+    const batch = data ?? [];
+    result.push(...batch);
+    if (batch.length < 1000) break;
+  }
+  return result as import('./db').AttendanceLog[];
 }
 
 export async function cloudSaveAttendance(row: import('./db').AttendanceLog): Promise<import('./db').AttendanceLog> {
@@ -190,9 +203,21 @@ export async function cloudSaveAttendance(row: import('./db').AttendanceLog): Pr
 
 export async function cloudFetchFeedbacks(): Promise<import('./db').CustomerFeedback[]> {
   const { client } = await requireSignedInClient();
-  const { data, error } = await client.from('customer_feedbacks').select('*').order('createdAt', { ascending: false });
-  if (error) throw new Error('Unable to load cloud feedback: ' + error.message);
-  return (data ?? []).map((row: any) => ({
+  const result: Record<string, any>[] = [];
+  // Stable secondary ordering avoids page boundaries depending only on tied timestamps.
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await client
+      .from('customer_feedbacks')
+      .select('*')
+      .order('createdAt', { ascending: false })
+      .order('id', { ascending: true })
+      .range(offset, offset + 999);
+    if (error) throw new Error('Unable to load cloud feedback: ' + error.message);
+    const batch = data ?? [];
+    result.push(...batch);
+    if (batch.length < 1000) break;
+  }
+  return result.map((row: any) => ({
     ...row,
     ref1: row.ref1Availability || row.ref1Feedback ? { availability: row.ref1Availability || '', feedback: row.ref1Feedback || '' } : undefined,
     ref2: row.ref2Availability || row.ref2Feedback ? { availability: row.ref2Availability || '', feedback: row.ref2Feedback || '' } : undefined,
