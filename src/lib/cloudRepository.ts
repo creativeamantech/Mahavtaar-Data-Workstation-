@@ -182,7 +182,8 @@ export async function cloudSaveAttendance(row: import('./db').AttendanceLog): Pr
   if (row.userId !== user.id && user.app_metadata?.role !== 'ADMIN' && user.app_metadata?.role !== 'MANAGER') {
     throw new Error('You may only update your own attendance record.');
   }
-  const { data, error } = await client.from('attendance_logs').upsert(row, { onConflict: 'id' }).select('*').single();
+  const payload = { ...row, currentBreakStart: row.currentBreakStart ?? null };
+  const { data, error } = await client.from('attendance_logs').upsert(payload, { onConflict: 'id' }).select('*').single();
   if (error) throw new Error('Cloud attendance save failed: ' + error.message);
   return data as import('./db').AttendanceLog;
 }
