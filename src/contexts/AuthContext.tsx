@@ -227,7 +227,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return safeUser;
   };
 
-  const logout = () => {\n    if (CLOUD_FIRST_AUTH) {\n      const client = getSupabaseClient();\n      if (client) void client.auth.signOut();\n    }\n    setUser(null);\n  };
+  const logout = () => {
+    if (CLOUD_FIRST_AUTH) {
+      const client = getSupabaseClient();
+      if (client) void client.auth.signOut();
+    }
+    setUser(null);
+  };
 
   const hasPermission = (view: string) => {
     if (!user) return false;
