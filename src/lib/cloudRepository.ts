@@ -145,7 +145,8 @@ export async function cloudSaveTarget(key: string, pct: number, userName: string
 }
 
 export async function cloudFetchUploads(): Promise<UploadSession[]> {
-  const { client } = await requireSignedInClient();
+  const { client, user } = await requireSignedInClient();
+  if (!['ADMIN', 'MANAGER'].includes(String(user.app_metadata?.role))) return [];
   const { data, error } = await client.from('upload_sessions').select('*').order('createdAt', { ascending: false });
   if (error) throw new Error('Unable to load cloud upload history: ' + error.message);
   return (data ?? []) as UploadSession[];
@@ -158,7 +159,8 @@ export async function cloudSaveUpload(row: UploadSession): Promise<void> {
 }
 
 export async function cloudFetchAudit(): Promise<AuditEntry[]> {
-  const { client } = await requireSignedInClient();
+  const { client, user } = await requireSignedInClient();
+  if (!['ADMIN', 'MANAGER'].includes(String(user.app_metadata?.role))) return [];
   const { data, error } = await client.from('audit_log').select('*').order('createdAt', { ascending: false }).limit(5000);
   if (error) throw new Error('Unable to load cloud audit log: ' + error.message);
   return (data ?? []) as AuditEntry[];
