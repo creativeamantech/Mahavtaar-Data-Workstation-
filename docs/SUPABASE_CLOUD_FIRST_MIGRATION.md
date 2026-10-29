@@ -32,7 +32,7 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 - The opt-in flag is `VITE_CLOUD_FIRST_AUTH=true`. It is deliberately not enabled by default; do not enable it for production until the first administrator and staff accounts are provisioned and the remaining cloud-data migration is complete.
 - Added `src/lib/cloudRepository.ts` for paginated cloud loan reads, bounded upserts, loan edits, audit writes, targets, upload history, and audit reads. These methods deliberately throw on cloud errors rather than falling back to local data.
 - `DataContext` now routes the primary loan load, main/paid/additional/corrected imports, manual/bulk updates, targets, upload history, and audit reads through Supabase when cloud-first mode is enabled; local peer-journal transport in that context is disabled.
-- Attendance and customer-feedback repository functions now use Supabase in cloud-first mode; the attendance history and executive dashboard flows were routed through those repositories. Some screens still contain direct IndexedDB access and need a full audit. Cloud-first remains opt-in and must not be enabled for production yet.
+- Attendance and customer-feedback repository functions now use Supabase in cloud-first mode; attendance history, the executive dashboard, All Feedback, and Customer Detail feedback history now route through cloud repositories. These two feedback history screens no longer query IndexedDB while cloud-first mode is enabled. Remaining screens and direct IndexedDB call sites still require a full audit. Cloud-first remains opt-in and must not be enabled for production yet.
 - Settings now disables local-only backup/restore, factory reset, and local user management when cloud-first mode is enabled, to avoid misleading or destructive local-only operations. A proposed trusted `admin-users` Edge Function source file exists in the branch but is **not deployed**; cloud user provisioning remains unavailable until it is reviewed, safely deployed, and connected to the UI.
 
 ### Phase 1 — Authentication and authorization
@@ -74,7 +74,7 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 
 ## Live verification (2026-10-29)
 
-- GitHub Actions CI run `40812191880` completed successfully: dependency lockfile sync, install, production build, unit tests, and lint all passed for commit `02a55bbd16c6ead33e560812bca6435ec7c3697f`.
+- GitHub Actions CI run `40812191880` completed successfully for the earlier commit `02a55bbd16c6ead33e560812bca6435ec7c3697f`. After the feedback-history cloud-routing fixes, new CI run `40813358197` was observed in progress; do not treat the new commit as verified until that run completes.
 - The Supabase security advisor currently reports `auth_leaked_password_protection` as a warning. Enable leaked-password protection in the Supabase Auth security settings before production use: https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
 - The live `pg_policies` inspection showed the expected role-specific policies on loan records, feedback, attendance, targets, upload history, audit log, and user profiles. This verifies policy presence only; it does **not** replace real-user authorization tests.
 
