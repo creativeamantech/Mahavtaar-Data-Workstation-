@@ -229,178 +229,129 @@ export async function syncWithSupabase(
   direction: 'push' | 'pull' | 'bidirectional' = 'bidirectional',
   onProgress?: SyncProgressCallback
 ): Promise<SyncResult> {
-  const startTime = performance.now();
+  const started = performance.now();
   const errors: string[] = [];
-  let totalPushed = 0;
-  let totalPulled = 0;
-
+  let pushed = 0;
+  let pulled = 0;
   const client = getSupabaseClient();
+  const result = (): SyncResult => ({
+    success: errors.length === 0, pushed, pulled, errors,
+    durationMs: Math.round(performance.now() - started),
+  });
   if (!client) {
-    return {
-      success: false,
-      pushed: 0,
-      pulled: 0,
-      errors: ['Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'],
-      durationMs: 0,
-    };
+    errors.push('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+    return result();
   }
+
+  const { data: authData, error: authError } = await client.auth.getUser();
+  if (authError || !authData.user) {
+    errors.push('Sign in through Supabase Auth before syncing. Local IndexedDB data has not been changed.');
+    return result();
+  }
+  if (authData.user.app_metadata?.role !== 'ADMIN') {
+    errors.push('Secure sync requires a Supabase Auth user with server-managed app_metadata.role = ADMIN.');
+    return result();
+  }
+
+  const pushRows = async (table: string, rows: Record<string, unknown>[], conflict: string, label: string) => {
+    for (let i = 0; i < rows.length; i += 250) {
+      const batch = rows.slice(i, i + 250);
+      const { error } = await client.from(table).upsert(batch, { onConflict: conflict });
+      if (error) errors.push(label + ' push failed (rows ' + (i + 1) + '-' + (i + batch.length) + '): ' + error.message);
+      else pushed += batch.length;
+      onProgress?.(label + ': pushed ' + Math.min(i + batch.length, rows.length) + ' of ' + rows.length,
+        Math.min(i + batch.length, rows.length), rows.length);
+    }
+  };
+
+  const pullRows = async <T,>(table: string, label: string, apply: (rows: T[]) => Promise<unknown>) => {
+    const all: T[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await client.from(table).select('*').range(offset, offset + 999);
+      if (error) { errors.push(label + ' pull failed: ' + error.message); return; }
+      const batch = (data ?? []) as T[];
+      all.push(...batch);
+      if (batch.length < 1000) break;
+    }
+    try {
+      if (all.length) await apply(all);
+      pulled += all.length;
+      onProgress?.(label + ': pulled ' + all.length + ' records', all.length, all.length);
+    } catch (error) {
+      errors.push(label + ' local write failed: ' + (error instanceof Error ? error.message : 'Unknown IndexedDB error'));
+    }
+  };
+
+  const wantsPush = direction === 'push' || direction === 'bidirectional';
+  const wantsPull = direction === 'pull' || direction === 'bidirectional';
 
   try {
-    // Require a real Supabase Auth session before any cloud data access.
-    // The app's current local IndexedDB login does not create this session, so sync
-    // remains safely disabled until the authenticated server-side flow is implemented.
-    const { data: authData, error: authError } = await client.auth.getSession();
-    if (authError || !authData.session) {
-      return {
-        success: false,
-        pushed: 0,
-        pulled: 0,
-        errors: ['Secure cloud sync is unavailable: sign in through Supabase Auth first. Local IndexedDB data remains available.'],
-        durationMs: Math.round(performance.now() - startTime),
-      };
-    }
-
-    // 1. STATE TARGETS
-    if (direction === 'push' || direction === 'bidirectional') {
-      onProgress?.('Pushing State Targets to Supabase...', 1, 7);
-      const localTargets = await db.state_targets.toArray();
-      if (localTargets.length > 0) {
-        const { error } = await client
-          .from('state_targets')
-          .upsert(localTargets, { onConflict: 'key' });
-        if (error) errors.push(`Target push error: ${error.message}`);
-        else totalPushed += localTargets.length;
+    // Preserve bank-specific CSV columns in JSONB data; never discard them on cloud round-trip.
+    const loanColumns = new Set([
+      'agreementid', 'customer_name', 'customer_no', 'mobile', 'city', 'state',
+      'pos', 'bom_pos', 'tos', 'bom_bkt', 'cur_bkt', 'allocated_agency',
+      'executive_name', 'last_action', 'last_disposition', 'ptp_date', 'status',
+      'total_paid', 'waiver_amount', 'created_at', 'updated_at',
+    ]);
+    const toCloudLoan = (row: LoanRecord): Record<string, unknown> => {
+      const extra: Record<string, unknown> = row.data && typeof row.data === 'object'
+        ? { ...(row.data as Record<string, unknown>) } : {};
+      const cloud: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(row)) {
+        if (key === 'data') continue;
+        if (loanColumns.has(key)) cloud[key] = value;
+        else extra[key] = value;
       }
-    }
-
-    if (direction === 'pull' || direction === 'bidirectional') {
-      onProgress?.('Pulling State Targets from Supabase...', 2, 7);
-      const { data, error } = await client.from('state_targets').select('*');
-      if (!error && data && data.length > 0) {
-        await db.state_targets.bulkPut(data as StateTarget[]);
-        totalPulled += data.length;
-      }
-    }
-
-    // 2. USERS — deliberately excluded from cloud sync.
-    // Local application credentials contain password hashes/salts and must never be
-    // copied to Supabase through the browser client. User provisioning belongs on
-    // an authenticated server-side/MCP path with explicit identity mapping.
-
-    // 3. ATTENDANCE LOGS
-    if (direction === 'push' || direction === 'bidirectional') {
-      onProgress?.('Pushing Attendance Logs to Supabase...', 5, 7);
-      const localAttendance = await db.attendance_logs.toArray();
-      if (localAttendance.length > 0) {
-        // Push in chunks of 500
-        for (let i = 0; i < localAttendance.length; i += 500) {
-          const chunk = localAttendance.slice(i, i + 500);
-          const { error } = await client
-            .from('attendance_logs')
-            .upsert(chunk, { onConflict: 'id' });
-          if (error) errors.push(`Attendance push error: ${error.message}`);
-          else totalPushed += chunk.length;
-        }
-      }
-    }
-
-    if (direction === 'pull' || direction === 'bidirectional') {
-      onProgress?.('Pulling Attendance Logs from Supabase...', 6, 7);
-      const { data, error } = await client.from('attendance_logs').select('*');
-      if (!error && data && data.length > 0) {
-        await db.attendance_logs.bulkPut(data as AttendanceLog[]);
-        totalPulled += data.length;
-      }
-    }
-
-    // 4. CUSTOMER FEEDBACKS
-    if (direction === 'push' || direction === 'bidirectional') {
-      onProgress?.('Pushing Customer Feedbacks to Supabase...', 7, 7);
-      const localFeedbacks = await db.customer_feedbacks.toArray();
-      if (localFeedbacks.length > 0) {
-        for (let i = 0; i < localFeedbacks.length; i += 500) {
-          const chunk = localFeedbacks.slice(i, i + 500);
-          const { error } = await client
-            .from('customer_feedbacks')
-            .upsert(chunk, { onConflict: 'id' });
-          if (error) errors.push(`Feedbacks push error: ${error.message}`);
-          else totalPushed += chunk.length;
-        }
-      }
-    }
-
-    if (direction === 'pull' || direction === 'bidirectional') {
-      const { data, error } = await client.from('customer_feedbacks').select('*');
-      if (!error && data && data.length > 0) {
-        await db.customer_feedbacks.bulkPut(data as CustomerFeedback[]);
-        totalPulled += data.length;
-      }
-    }
-
-    // 5. LOAN RECORDS (Bulk batches)
-    if (direction === 'push' || direction === 'bidirectional') {
-      const localLoans = await db.loan_records.toArray();
-      if (localLoans.length > 0) {
-        // Push in chunks of 500 records
-        for (let i = 0; i < localLoans.length; i += 500) {
-          const chunk = localLoans.slice(i, i + 500);
-          onProgress?.(`Pushing Loan Records (${i + 1}-${Math.min(i + 500, localLoans.length)} of ${localLoans.length})...`, i, localLoans.length);
-          const { error } = await client
-            .from('loan_records')
-            .upsert(chunk, { onConflict: 'agreementid' });
-          if (error) {
-            errors.push(`Loan records push chunk error: ${error.message}`);
-          } else {
-            totalPushed += chunk.length;
-          }
-        }
-      }
-    }
-
-    if (direction === 'pull' || direction === 'bidirectional') {
-      onProgress?.('Pulling Loan Records from Supabase...', 1, 1);
-      const { data, error } = await client.from('loan_records').select('*');
-      if (!error && data && data.length > 0) {
-        await db.loan_records.bulkPut(data as LoanRecord[]);
-        totalPulled += data.length;
-      }
-    }
-
-    // 6. UPLOAD SESSIONS & AUDIT LOG
-    if (direction === 'push' || direction === 'bidirectional') {
-      const localSessions = await db.upload_sessions.toArray();
-      if (localSessions.length > 0) {
-        await client.from('upload_sessions').upsert(localSessions, { onConflict: 'id' });
-      }
-      const localAudit = await db.audit_log.toArray();
-      if (localAudit.length > 0) {
-        for (let i = 0; i < localAudit.length; i += 500) {
-          const chunk = localAudit.slice(i, i + 500);
-          await client.from('audit_log').upsert(chunk, { onConflict: 'id' });
-        }
-      }
-    }
-
-    const durationMs = Math.round(performance.now() - startTime);
-
-    return {
-      success: errors.length === 0,
-      pushed: totalPushed,
-      pulled: totalPulled,
-      errors,
-      durationMs,
+      cloud.data = extra;
+      return cloud;
     };
-  } catch (err: any) {
-    const durationMs = Math.round(performance.now() - startTime);
-    errors.push(err?.message || 'Sync failed');
-    return {
-      success: false,
-      pushed: totalPushed,
-      pulled: totalPulled,
-      errors,
-      durationMs,
+    const fromCloudLoan = (row: Record<string, unknown>): LoanRecord => {
+      const extra = row.data && typeof row.data === 'object'
+        ? row.data as Record<string, unknown> : {};
+      return { ...extra, ...row, data: extra } as LoanRecord;
     };
+
+    if (wantsPush) {
+      onProgress?.('Preparing local data for secure cloud sync...', 0, 7);
+      const [targets, attendance, feedbacks, loans, sessions, audits] = await Promise.all([
+        db.state_targets.toArray(), db.attendance_logs.toArray(), db.customer_feedbacks.toArray(),
+        db.loan_records.toArray(), db.upload_sessions.toArray(), db.audit_log.toArray(),
+      ]);
+      await pushRows('state_targets', targets as unknown as Record<string, unknown>[], 'key', 'State targets');
+      await pushRows('attendance_logs', attendance as unknown as Record<string, unknown>[], 'id', 'Attendance');
+      await pushRows('customer_feedbacks', feedbacks.map((row) => {
+        const record = { ...row } as unknown as Record<string, unknown>;
+        if (row.ref1 && !record.ref1Availability) record.ref1Availability = row.ref1.availability;
+        if (row.ref1 && !record.ref1Feedback) record.ref1Feedback = row.ref1.feedback;
+        if (row.ref2 && !record.ref2Availability) record.ref2Availability = row.ref2.availability;
+        if (row.ref2 && !record.ref2Feedback) record.ref2Feedback = row.ref2.feedback;
+        delete record.ref1; delete record.ref2;
+        return record;
+      }), 'id', 'Customer feedback');
+      await pushRows('loan_records', loans.map(toCloudLoan), 'agreementid', 'Loan records');
+      await pushRows('upload_sessions', sessions as unknown as Record<string, unknown>[], 'id', 'Upload sessions');
+      await pushRows('audit_log', audits as unknown as Record<string, unknown>[], 'id', 'Audit log');
+    }
+
+    if (wantsPull) {
+      await pullRows<Record<string, unknown>>('state_targets', 'State targets', rows => db.state_targets.bulkPut(rows as unknown as StateTarget[]));
+      await pullRows<Record<string, unknown>>('attendance_logs', 'Attendance', rows => db.attendance_logs.bulkPut(rows as unknown as AttendanceLog[]));
+      await pullRows<Record<string, unknown>>('customer_feedbacks', 'Customer feedback', rows => db.customer_feedbacks.bulkPut(rows as unknown as CustomerFeedback[]));
+      await pullRows<Record<string, unknown>>('loan_records', 'Loan records', rows => db.loan_records.bulkPut(rows.map(fromCloudLoan)));
+      await pullRows<Record<string, unknown>>('upload_sessions', 'Upload sessions', rows => db.upload_sessions.bulkPut(rows as unknown as UploadSession[]));
+      await pullRows<Record<string, unknown>>('audit_log', 'Audit log', rows => db.audit_log.bulkPut(rows as unknown as AuditEntry[]));
+    }
+
+    // Local users/password hashes are intentionally never synced. Supabase Auth owns cloud identity.
+    onProgress?.('Sync verification: refreshing cloud table counts...', 7, 7);
+    const counts = await fetchSupabaseTableCounts();
+    for (const table of ['loan_records', 'customer_feedbacks', 'attendance_logs', 'state_targets', 'upload_sessions', 'audit_log']) {
+      if (counts[table] === undefined) errors.push('Post-sync verification failed: unable to read count for ' + table + '.');
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : 'Unexpected sync failure.');
   }
+  return result();
 }
 
 /**
