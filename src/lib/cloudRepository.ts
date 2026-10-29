@@ -147,9 +147,20 @@ export async function cloudSaveTarget(key: string, pct: number, userName: string
 export async function cloudFetchUploads(): Promise<UploadSession[]> {
   const { client, user } = await requireSignedInClient();
   if (!['ADMIN', 'MANAGER'].includes(String(user.app_metadata?.role))) return [];
-  const { data, error } = await client.from('upload_sessions').select('*').order('createdAt', { ascending: false });
-  if (error) throw new Error('Unable to load cloud upload history: ' + error.message);
-  return (data ?? []) as UploadSession[];
+  const result: UploadSession[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await client
+      .from('upload_sessions')
+      .select('*')
+      .order('createdAt', { ascending: false })
+      .order('id', { ascending: true })
+      .range(offset, offset + 999);
+    if (error) throw new Error('Unable to load cloud upload history: ' + error.message);
+    const batch = (data ?? []) as UploadSession[];
+    result.push(...batch);
+    if (batch.length < 1000) break;
+  }
+  return result;
 }
 
 export async function cloudSaveUpload(row: UploadSession): Promise<void> {
@@ -161,9 +172,20 @@ export async function cloudSaveUpload(row: UploadSession): Promise<void> {
 export async function cloudFetchAudit(): Promise<AuditEntry[]> {
   const { client, user } = await requireSignedInClient();
   if (!['ADMIN', 'MANAGER'].includes(String(user.app_metadata?.role))) return [];
-  const { data, error } = await client.from('audit_log').select('*').order('createdAt', { ascending: false }).limit(5000);
-  if (error) throw new Error('Unable to load cloud audit log: ' + error.message);
-  return (data ?? []) as AuditEntry[];
+  const result: AuditEntry[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await client
+      .from('audit_log')
+      .select('*')
+      .order('createdAt', { ascending: false })
+      .order('id', { ascending: true })
+      .range(offset, offset + 999);
+    if (error) throw new Error('Unable to load cloud audit log: ' + error.message);
+    const batch = (data ?? []) as AuditEntry[];
+    result.push(...batch);
+    if (batch.length < 1000) break;
+  }
+  return result;
 }
 
 export function isCloudFirstEnabled(): boolean {
