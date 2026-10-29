@@ -2,6 +2,7 @@ import { createContext, useContext, useState, ReactNode, useEffect } from 'react
 import { User, Role, DEFAULT_PERMISSIONS } from '../constants/permissions';
 import { db } from '../lib/db';
 import { derivePasswordHash, verifyPassword } from '../lib/authCrypto';
+import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
 
 interface AuthContextType {
   user: User | null;
@@ -17,6 +18,30 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
+
+// Opt-in during migration so the production login is not switched before Supabase users are provisioned.
+const CLOUD_FIRST_AUTH = import.meta.env.VITE_CLOUD_FIRST_AUTH === 'true';
+
+function mapSupabaseUser(authUser: { id: string; email?: string; app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> }): User {
+  const metadata = authUser.app_metadata ?? {};
+  const roleValue = metadata.role;
+  if (typeof roleValue !== 'string' || !['ADMIN', 'MANAGER', 'EXECUTIVE', 'VIEWER'].includes(roleValue)) {
+    throw new Error('Your Supabase account has no valid administrator-assigned role. Contact your system administrator.');
+  }
+  const role = roleValue as Role;
+  const configuredViews = (metadata.permissions as { views?: unknown } | undefined)?.views;
+  const views = Array.isArray(configuredViews) ? configuredViews.filter((view): view is string => typeof view === 'string') : DEFAULT_PERMISSIONS[role] || [];
+  const name = typeof metadata.name === 'string' ? metadata.name : typeof authUser.user_metadata?.name === 'string' ? authUser.user_metadata.name : authUser.email || 'User';
+  return {
+    id: authUser.id,
+    name,
+    email: authUser.email,
+    role,
+    permissions: { views },
+    assignedExecutiveName: typeof metadata.assignedExecutiveName === 'string' ? metadata.assignedExecutiveName : undefined,
+    maintenanceMode: metadata.maintenanceMode === true,
+  };
+}
 
 const MOCK_USERS: User[] = [
   { id: '1', name: 'Admin User', email: 'admin@company.com', role: 'ADMIN', permissions: { views: DEFAULT_PERMISSIONS.ADMIN } },
@@ -144,7 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return safeUser;
   };
 
-  const logout = () => setUser(null);
+  const logout = () => {\n    if (CLOUD_FIRST_AUTH) {\n      const client = getSupabaseClient();\n      if (client) void client.auth.signOut();\n    }\n    setUser(null);\n  };
 
   const hasPermission = (view: string) => {
     if (!user) return false;
