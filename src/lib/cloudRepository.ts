@@ -77,11 +77,9 @@ export async function cloudUpdateLoan(agreementid: string, updates: Record<strin
   const { data: existing, error: readError } = await client.from('loan_records').select('*').eq('agreementid', agreementid).maybeSingle();
   if (readError) throw new Error('Unable to read loan before update: ' + readError.message);
   if (!existing) throw new Error('Loan record not found or you do not have permission to access it.');
+
   const oldRecord = fromCloudLoan(existing);
   const updated = { ...oldRecord, ...updates, agreementid, updated_by: actor, updated_at: new Date().toISOString() };
-  const { error: writeError } = await client.from('loan_records').upsert(toCloudLoan(updated), { onConflict: 'agreementid' });
-  if (writeError) throw new Error('Cloud loan update failed: ' + writeError.message);
-
   const timestamp = new Date().toISOString();
   const auditRows = Object.entries(updates)
     .filter(([field, value]) => !field.endsWith('_source') && oldRecord[field] !== value)
@@ -90,14 +88,17 @@ export async function cloudUpdateLoan(agreementid: string, updates: Record<strin
       oldValue: String(oldRecord[field] ?? ''), newValue: String(value ?? ''),
       changedBy: actor, createdAt: timestamp, source: 'MANUAL',
     }));
-  if (auditRows.length) {
-    const { error: auditError } = await client.from('audit_log').insert(auditRows);
-    if (auditError) throw new Error('Loan saved, but audit write failed; contact an administrator. ' + auditError.message);
-  }
+
+  const { error } = await client.rpc('cloud_apply_loan_changes', {
+    p_records: [toCloudLoan(updated)],
+    p_audit_rows: auditRows,
+  });
+  if (error) throw new Error('Cloud loan update was not committed: ' + error.message);
 }
 
 export async function cloudBulkUpdateLoans(items: Array<{ agreementId: string; updates: Record<string, unknown> }>, actor: string): Promise<void> {
   if (!items.length) return;
+  if (items.length > 5000) throw new Error('Bulk update is limited to 5,000 loans per atomic operation.');
   const all = await cloudFetchLoans();
   const byId = new Map(all.map(row => [String(row.agreementid), row]));
   const timestamp = new Date().toISOString();
@@ -113,15 +114,14 @@ export async function cloudBulkUpdateLoans(items: Array<{ agreementId: string; u
     }
     changed.push({ ...existing, ...item.updates, agreementid: item.agreementId, updated_by: actor, updated_at: timestamp });
   }
+  if (!changed.length) return;
+
   const { client } = await requireSignedInClient();
-  for (let i = 0; i < changed.length; i += 250) {
-    const { error } = await client.from('loan_records').upsert(changed.slice(i, i + 250).map(toCloudLoan), { onConflict: 'agreementid' });
-    if (error) throw new Error('Cloud bulk update failed: ' + error.message);
-  }
-  for (let i = 0; i < audits.length; i += 250) {
-    const { error } = await client.from('audit_log').insert(audits.slice(i, i + 250));
-    if (error) throw new Error('Cloud audit write failed: ' + error.message);
-  }
+  const { error } = await client.rpc('cloud_apply_loan_changes', {
+    p_records: changed.map(toCloudLoan),
+    p_audit_rows: audits,
+  });
+  if (error) throw new Error('Cloud bulk update was rolled back; no changes were committed: ' + error.message);
 }
 
 export async function cloudFetchTargets(): Promise<StateTarget[]> {
