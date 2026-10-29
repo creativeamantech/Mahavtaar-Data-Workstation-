@@ -5,6 +5,8 @@ import { useAuth } from './AuthContext';
 import { atomicFileImport, atomicUpdateLoanRecord, atomicBulkUpdateLoanRecords } from '../lib/repositories/loanRepository';
 import { setTargetRecord, deleteTargetRecord } from '../lib/repositories/targetRepository';
 import { SyncEngine } from '../lib/sync/SyncEngine';
+import { toast } from 'sonner';
+import { cloudFetchAudit, cloudFetchLoans, cloudFetchTargets, cloudFetchUploads, cloudSaveTarget, cloudSaveUpload, cloudUpsertLoans, cloudUpdateLoan, cloudBulkUpdateLoans, isCloudFirstEnabled } from '../lib/cloudRepository';
 
 interface DataContextType {
   isLoading: boolean;
@@ -62,10 +64,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
   }, [records]);
 
-  // Start local-first journal transport while a user session is active.
-  // This transport is same-origin tabs only; it does not provide internet relay.
+  // Local peer-mesh transport is disabled in cloud-first mode.
   useEffect(() => {
-    if (!user) return;
+    if (!user || isCloudFirstEnabled()) return;
 
     let active = true;
     const refreshFromLocalDb = async () => {
@@ -102,9 +103,42 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
-  // Load from Dexie on mount
+  // Load from the authoritative store. Cloud mode must never silently fall back to IndexedDB.
   useEffect(() => {
+    let active = true;
     async function loadData() {
+      if (isCloudFirstEnabled()) {
+        try {
+          if (!user) {
+            setRecords([]);
+            setTargets({});
+            setUploadHistory([]);
+            setAuditLog([]);
+            return;
+          }
+          const [cloudRecords, cloudTargets, cloudUploads, cloudAudit] = await Promise.all([
+            cloudFetchLoans(), cloudFetchTargets(), cloudFetchUploads(), cloudFetchAudit(),
+          ]);
+          if (!active) return;
+          const scopedRecords = user.role === 'EXECUTIVE'
+            ? cloudRecords.filter(r => {
+                const targets = [user.assignedExecutiveName, user.name].filter(Boolean).map(v => String(v).trim().toLowerCase());
+                const raw = String(r.executive_name || r['Executive Name'] || r.EXECUTIVE_NAME || r.FOS_Name || r['FOS Name'] || r.fos || r.FOS || r.executive || '').trim().toLowerCase();
+                return !!raw && targets.some(t => raw === t || raw.includes(t) || t.includes(raw));
+              })
+            : cloudRecords;
+          setRecords(scopedRecords);
+          setTargets(cloudTargets.reduce((acc, row) => { acc[row.key] = row.pct; return acc; }, {} as Record<string, number>));
+          setUploadHistory(cloudUploads);
+          setAuditLog(cloudAudit);
+        } catch (error) {
+          console.error('[DataContext] cloud load failed; local fallback intentionally disabled', error);
+          toast.error(error instanceof Error ? error.message : 'Unable to load cloud data. Check your connection and access.');
+        } finally {
+          if (active) setIsLoading(false);
+        }
+        return;
+      }
       // 1. Migrate legacy localStorage targets if present
       try {
         const savedTargetsStr = localStorage.getItem('app_targets');
@@ -150,6 +184,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }
     }
     loadData();
+    return () => { active = false; };
   }, [user]);
 
   const loadMainFile = useCallback(async (buffer: ArrayBuffer, fileName: string, userName: string) => {
@@ -165,9 +200,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       };
     });
     const entry = { id: crypto.randomUUID(), type: 'MAIN_DATA', fileName, recordCount: normalizedRecords.length, uploadedBy: userName, createdAt: new Date().toISOString() };
+    if (isCloudFirstEnabled()) {
+      await cloudUpsertLoans(normalizedRecords);
+      await cloudSaveUpload(entry as UploadSession);
+    } else {
+      await atomicFileImport(normalizedRecords, entry as UploadSession);
+    }
     setUploadHistory(prev => [entry, ...prev]);
-    
-    await atomicFileImport(normalizedRecords, entry as UploadSession);
     
     const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
     const dbRecords = await fetchAuthorizedLoanRecords(user);
@@ -180,14 +219,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const paidRows = parsePaidFile(buffer);
     let matched = 0;
     
-    const allDbRecords = await db.loan_records.toArray();
+    const allDbRecords = isCloudFirstEnabled() ? await cloudFetchLoans() : await db.loan_records.toArray();
     const mergedData = mergePaidIntoRecords(allDbRecords, paidRows);
     matched = paidRows.filter(p => allDbRecords.some(r => r.agreementid === p.agreementid)).length;
     
     const entry = { id: crypto.randomUUID(), type: 'PAID_FILE', fileName, recordCount: paidRows.length, uploadedBy: userName, createdAt: new Date().toISOString() };
+    if (isCloudFirstEnabled()) {
+      await cloudUpsertLoans(mergedData);
+      await cloudSaveUpload(entry as UploadSession);
+    } else {
+      await atomicFileImport(mergedData, entry as UploadSession);
+    }
     setUploadHistory(prev => [entry, ...prev]);
-    
-    await atomicFileImport(mergedData, entry as UploadSession);
     
     const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
     const dbRecords = await fetchAuthorizedLoanRecords(user);
@@ -199,7 +242,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const loadAdditionalFile = useCallback(async (buffer: ArrayBuffer, fileName: string, userName: string) => {
     const additionalRows = parseAdditionalFile(buffer);
     
-    const allDbRecords = await db.loan_records.toArray();
+    const allDbRecords = isCloudFirstEnabled() ? await cloudFetchLoans() : await db.loan_records.toArray();
     const { merged, stats } = mergeAdditionalIntoRecords(allDbRecords, additionalRows);
     const matched = additionalRows.filter(p => allDbRecords.some(r => r.agreementid === p.agreementid)).length;
     
@@ -218,7 +261,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const loadCorrectedFile = useCallback(async (buffer: ArrayBuffer, fileName: string, userName: string) => {
     const correctedRows = parseCorrectedFile(buffer);
     
-    const allDbRecords = await db.loan_records.toArray();
+    const allDbRecords = isCloudFirstEnabled() ? await cloudFetchLoans() : await db.loan_records.toArray();
     const { merged, matched } = mergeCorrectedIntoRecords(allDbRecords, correctedRows);
     
     const entry = { id: crypto.randomUUID(), type: 'CORRECTED_DAC_FILE', fileName, recordCount: correctedRows.length, uploadedBy: userName, createdAt: new Date().toISOString() };
@@ -236,13 +279,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const updateRecord = useCallback(async (agreementid: string, field: string, value: any, userName: string) => {
     let oldVal = '';
     
-    setRecords(prev => prev.map(r => {
-      if (r.agreementid === agreementid) {
-        oldVal = String(r[field] ?? '');
-        return { ...r, [field]: value, [`${field}_source`]: 'MANUAL' };
-      }
-      return r;
-    }));
+    const existingRecord = records.find(r => r.agreementid === agreementid);
+    oldVal = String(existingRecord?.[field] ?? '');
+    const updatePayload = { [field]: value, [`${field}_source`]: 'MANUAL' };
+    if (isCloudFirstEnabled()) {
+      await cloudUpdateLoan(agreementid, updatePayload, userName);
+    } else {
+      await atomicUpdateLoanRecord(agreementid, updatePayload, { userName, userRole: user?.role || 'VIEWER', source: 'MANUAL' });
+    }
+    setRecords(prev => prev.map(r => r.agreementid === agreementid ? { ...r, ...updatePayload } : r));
     
     const audit = {
       id: crypto.randomUUID(),
@@ -256,12 +301,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
     
     setAuditLog(a => [audit, ...a]);
-    
-    await atomicUpdateLoanRecord(
-      agreementid,
-      { [field]: value, [`${field}_source`]: 'MANUAL' },
-      { userName, userRole: user?.role || 'VIEWER', source: 'MANUAL' }
-    );
     
     setUndoStack(prev => [...prev, { type: 'UPDATE', audits: [audit] }]);
     setRedoStack([]);
@@ -280,6 +319,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updateMap.get(u.agreementid)[`${u.field}_source`] = 'MANUAL';
     });
 
+    const recordsById = new Map(records.map(r => [r.agreementid, r]));
     setRecords(prev => {
       const next = prev.map(r => {
         if (updateMap.has(r.agreementid)) {
@@ -314,10 +354,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updates: upds
     }));
 
-    await atomicBulkUpdateLoanRecords(
-      formattedUpdates,
-      { userName, userRole: user?.role || 'VIEWER', source: 'BULK_OPERATION' }
-    );
+    if (isCloudFirstEnabled()) {
+      await cloudBulkUpdateLoans(formattedUpdates, userName);
+    } else {
+      await atomicBulkUpdateLoanRecords(formattedUpdates, { userName, userRole: user?.role || 'VIEWER', source: 'BULK_OPERATION' });
+    }
 
     setUndoStack(prev => [...prev, { type: 'BULK_UPDATE', audits: newAudits }]);
     setRedoStack([]);
@@ -325,7 +366,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const setTarget = useCallback(async (key: string, pct: number, userName: string) => {
     const actor = userName || user?.name || 'System';
-    if (pct <= 0) {
+    if (isCloudFirstEnabled()) {
+      await cloudSaveTarget(key, pct, actor);
+    } else if (pct <= 0) {
       setTargets(prev => {
         const next = { ...prev };
         delete next[key];
