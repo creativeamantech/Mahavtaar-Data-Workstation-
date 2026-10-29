@@ -120,7 +120,9 @@ export async function punchOut(
 export async function startBreak(
   attendanceId: string
 ): Promise<AttendanceLog | undefined> {
-  const existing = await db.attendance_logs.get(attendanceId);
+  const existing = isCloudFirstEnabled()
+    ? (await cloudFetchAttendance()).find(row => row.id === attendanceId)
+    : await db.attendance_logs.get(attendanceId);
   if (!existing || existing.currentBreakStart) return existing;
 
   const nowIso = new Date().toISOString();
@@ -128,6 +130,10 @@ export async function startBreak(
     ...existing,
     currentBreakStart: nowIso,
   };
+
+  if (isCloudFirstEnabled()) return await cloudSaveAttendance(updatedLog);
+
+  if (isCloudFirstEnabled()) return await cloudSaveAttendance(updatedLog);
 
   await db.transaction('rw', [db.attendance_logs, db.sync_journal], async () => {
     await db.attendance_logs.put(updatedLog);
@@ -156,7 +162,9 @@ export async function startBreak(
 export async function endBreak(
   attendanceId: string
 ): Promise<AttendanceLog | undefined> {
-  const existing = await db.attendance_logs.get(attendanceId);
+  const existing = isCloudFirstEnabled()
+    ? (await cloudFetchAttendance()).find(row => row.id === attendanceId)
+    : await db.attendance_logs.get(attendanceId);
   if (!existing || !existing.currentBreakStart) return existing;
 
   const nowIso = new Date().toISOString();
