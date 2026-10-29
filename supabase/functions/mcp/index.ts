@@ -70,18 +70,37 @@ type JsonRpcRequest = {
   params?: Record<string, unknown>;
 };
 
-function jsonResponse(body: unknown, status = 200, origin = ''): Response {
-  // This endpoint uses an explicit Bearer token and validates Supabase Auth + ADMIN
-  // server-side; it does not use browser cookies. Wildcard CORS permits hosted
-  // previews (including AI Studio) while authentication remains mandatory.
+function getAllowedOrigins(): string[] {
+  return (Deno.env.get('MCP_ALLOWED_ORIGINS') ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => {
+      if (!item) return false;
+      try {
+        const parsed = new URL(item);
+        return parsed.origin === item && (parsed.protocol === 'https:' || parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
+      } catch {
+        return false;
+      }
+    });
+}
+
+function corsHeaders(origin: string): Headers {
   const headers = new Headers({
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
     'vary': 'Origin',
-    'access-control-allow-origin': '*',
     'access-control-allow-headers': 'authorization, content-type, mcp-protocol-version, apikey, x-client-info',
     'access-control-allow-methods': 'POST, OPTIONS',
   });
+  if (origin && getAllowedOrigins().includes(origin)) {
+    headers.set('access-control-allow-origin', origin);
+  }
+  return headers;
+}
+
+function jsonResponse(body: unknown, status = 200, origin = ''): Response {
+  const headers = corsHeaders(origin);
+  headers.set('content-type', 'application/json; charset=utf-8');
+  headers.set('cache-control', 'no-store');
   return new Response(JSON.stringify(body), { status, headers });
 }
 
@@ -99,14 +118,12 @@ function textContent(value: unknown) {
 
 Deno.serve(async (request: Request) => {
   const origin = request.headers.get('origin') ?? '';
+  if (origin && !getAllowedOrigins().includes(origin)) {
+    return new Response('Origin not allowed', { status: 403, headers: { 'vary': 'Origin' } });
+  }
   if (request.method === 'OPTIONS') {
-    const headers = new Headers({
-      'vary': 'Origin',
-      'access-control-allow-origin': '*',
-      'access-control-allow-headers': 'authorization, content-type, mcp-protocol-version, apikey, x-client-info',
-      'access-control-allow-methods': 'POST, OPTIONS',
-      'access-control-max-age': '600',
-    });
+    const headers = corsHeaders(origin);
+    headers.set('access-control-max-age', '600');
     return new Response(null, { status: 204, headers });
   }
   if (request.method !== 'POST') {
@@ -152,13 +169,7 @@ Deno.serve(async (request: Request) => {
     }), 200, origin);
   }
   if (rpc.method === 'notifications/initialized') {
-    const headers = new Headers({
-      'vary': 'Origin',
-      'access-control-allow-origin': '*',
-      'access-control-allow-headers': 'authorization, content-type, mcp-protocol-version, apikey, x-client-info',
-      'access-control-allow-methods': 'POST, OPTIONS',
-    });
-    return new Response(null, { status: 202, headers });
+    return new Response(null, { status: 202, headers: corsHeaders(origin) });
   }
   if (rpc.method === 'ping') return jsonResponse(rpcResult(rpc.id, {}), 200, origin);
 
