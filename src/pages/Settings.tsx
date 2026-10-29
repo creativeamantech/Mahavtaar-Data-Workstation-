@@ -187,14 +187,14 @@ function UserManagementTab() {
   };
 
   const handleDelete = async (id: string) => {
-    if (isCloudFirstEnabled()) {
-      toast.error('Cloud user deletion is not enabled yet. Use the trusted administrator workflow.');
-      return;
-    }
     if (id === currentUser?.id) return toast.error("Cannot delete yourself");
-    if (!confirm('Delete user?')) return;
-    await deleteUser(id);
-    toast.success('User deleted');
+    if (!confirm(isCloudFirstEnabled() ? 'Permanently delete this Supabase Auth account?' : 'Delete user?')) return;
+    try {
+      await deleteUser(id);
+      toast.success(isCloudFirstEnabled() ? 'Cloud user deleted' : 'User deleted');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to delete user');
+    }
   };
 
   const columns = [
