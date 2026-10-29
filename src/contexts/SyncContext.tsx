@@ -14,6 +14,7 @@ import { getLocalDeviceIdentity, updateLocalDeviceName } from '../lib/sync/devic
 import { resolveConflictRecord } from '../lib/sync/crdtEngine';
 import { BackupSnapshotRecord, db } from '../lib/db';
 import { toast } from 'sonner';
+import { isCloudFirstEnabled } from '../lib/cloudRepository';
 
 interface SyncContextType {
   identity: DeviceIdentity;
@@ -93,6 +94,14 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (isCloudFirstEnabled()) {
+      setStats(prev => ({ ...prev, totalPeers: 0, approvedPeers: 0, onlinePeers: 0, pendingApproval: 0, queuedChanges: 0, networkMode: 'OFFLINE' as NetworkMode }));
+      setPeers([]);
+      setSessions([]);
+      setConflicts([]);
+      setBackups([]);
+      return;
+    }
     syncEngine.init().then(() => {
       refreshSyncData();
     });
@@ -108,7 +117,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
   // Update current user session in sync engine when user logs in or out
   useEffect(() => {
-    syncEngine.setCurrentUser(user ? { email: user.email, name: user.name, role: user.role } : null);
+    syncEngine.setCurrentUser(!isCloudFirstEnabled() && user ? { email: user.email, name: user.name, role: user.role } : null);
   }, [user]);
 
   const triggerManualSync = async () => {
