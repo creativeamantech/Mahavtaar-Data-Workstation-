@@ -133,8 +133,6 @@ export async function startBreak(
 
   if (isCloudFirstEnabled()) return await cloudSaveAttendance(updatedLog);
 
-  if (isCloudFirstEnabled()) return await cloudSaveAttendance(updatedLog);
-
   await db.transaction('rw', [db.attendance_logs, db.sync_journal], async () => {
     await db.attendance_logs.put(updatedLog);
 
@@ -177,6 +175,8 @@ export async function endBreak(
     currentBreakStart: undefined,
     breakDuration: newTotalBreak,
   };
+
+  if (isCloudFirstEnabled()) return await cloudSaveAttendance(updatedLog);
 
   await db.transaction('rw', [db.attendance_logs, db.sync_journal], async () => {
     await db.attendance_logs.put(updatedLog);
