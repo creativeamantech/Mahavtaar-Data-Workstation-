@@ -50,8 +50,8 @@ using (
   or (
     (auth.jwt() -> 'app_metadata' ->> 'role') = 'EXECUTIVE'
     and (
-      agentId = auth.uid()::text
-      or lower(coalesce(agentName, '')) in (
+      "agentId" = auth.uid()::text
+      or lower(coalesce("agentName", '')) in (
         nullif(lower(auth.jwt() -> 'app_metadata' ->> 'assignedExecutiveName'), ''),
         nullif(lower(auth.jwt() -> 'app_metadata' ->> 'name'), '')
       )
@@ -65,7 +65,7 @@ with check (
   (auth.jwt() -> 'app_metadata' ->> 'role') in ('ADMIN', 'MANAGER')
   or (
     (auth.jwt() -> 'app_metadata' ->> 'role') = 'EXECUTIVE'
-    and agentId = auth.uid()::text
+    and "agentId" = auth.uid()::text
   )
 );
 
@@ -73,11 +73,11 @@ create policy "Users can update permitted feedback"
 on public.customer_feedbacks for update to authenticated
 using (
   (auth.jwt() -> 'app_metadata' ->> 'role') in ('ADMIN', 'MANAGER')
-  or ((auth.jwt() -> 'app_metadata' ->> 'role') = 'EXECUTIVE' and agentId = auth.uid()::text)
+  or ((auth.jwt() -> 'app_metadata' ->> 'role') = 'EXECUTIVE' and "agentId" = auth.uid()::text)
 )
 with check (
   (auth.jwt() -> 'app_metadata' ->> 'role') in ('ADMIN', 'MANAGER')
-  or ((auth.jwt() -> 'app_metadata' ->> 'role') = 'EXECUTIVE' and agentId = auth.uid()::text)
+  or ((auth.jwt() -> 'app_metadata' ->> 'role') = 'EXECUTIVE' and "agentId" = auth.uid()::text)
 );
 
 create policy "Managers can delete feedback"
@@ -88,25 +88,25 @@ create policy "Users can read permitted attendance"
 on public.attendance_logs for select to authenticated
 using (
   (auth.jwt() -> 'app_metadata' ->> 'role') in ('ADMIN', 'MANAGER')
-  or userId = auth.uid()::text
+  or "userId" = auth.uid()::text
 );
 
 create policy "Users can insert permitted attendance"
 on public.attendance_logs for insert to authenticated
 with check (
   (auth.jwt() -> 'app_metadata' ->> 'role') in ('ADMIN', 'MANAGER')
-  or ((auth.jwt() -> 'app_metadata' ->> 'role') = 'EXECUTIVE' and userId = auth.uid()::text)
+  or ((auth.jwt() -> 'app_metadata' ->> 'role') = 'EXECUTIVE' and "userId" = auth.uid()::text)
 );
 
 create policy "Users can update permitted attendance"
 on public.attendance_logs for update to authenticated
 using (
   (auth.jwt() -> 'app_metadata' ->> 'role') in ('ADMIN', 'MANAGER')
-  or ((auth.jwt() -> 'app_metadata' ->> 'role') = 'EXECUTIVE' and userId = auth.uid()::text)
+  or ((auth.jwt() -> 'app_metadata' ->> 'role') = 'EXECUTIVE' and "userId" = auth.uid()::text)
 )
 with check (
   (auth.jwt() -> 'app_metadata' ->> 'role') in ('ADMIN', 'MANAGER')
-  or ((auth.jwt() -> 'app_metadata' ->> 'role') = 'EXECUTIVE' and userId = auth.uid()::text)
+  or ((auth.jwt() -> 'app_metadata' ->> 'role') = 'EXECUTIVE' and "userId" = auth.uid()::text)
 );
 
 create policy "Managers can delete attendance"
