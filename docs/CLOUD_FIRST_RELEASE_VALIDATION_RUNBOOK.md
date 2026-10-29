@@ -89,3 +89,11 @@ A dry-run must be read-only. The commit step must require an explicit administra
 - The Supabase security advisor still reports `auth_leaked_password_protection` as a warning. Enable leaked-password protection before production use.
 - The production app's exact HTTPS origin is not decided yet. Do not deploy the two functions until the production URL is chosen and the exact allowed origin(s) are configured as `ADMIN_USERS_ALLOWED_ORIGINS` and `STAFF_DIRECTORY_ALLOWED_ORIGINS` (or the documented fallback).
 - PR #7 remains draft and unmerged; `VITE_CLOUD_FIRST_AUTH` remains opt-in. No production function deployment or cloud-first cutover was performed during this verification.
+
+
+## Follow-up verification (2026-10-29, pagination hardening)
+
+- Commit `869e59834c0ee1660c07aa3aa127bf798a918234` adds explicit 1,000-row pagination and stable secondary ordering to cloud attendance and customer-feedback reads.
+- The change prevents these repository methods from silently stopping at the Supabase per-response row limit. It does not make attendance punch-in atomic; concurrent punch-ins still require a server-side uniqueness/transaction strategy.
+- A CI run for this exact commit was not returned by the available PR-run lookup at the time of this update. Do not treat the earlier successful CI run as validation of this commit.
+- Existing hard release gates remain unchanged: authenticated role-based RLS tests, migration dry-run/reconciliation, IndexedDB audit, atomic loan-plus-audit writes, Edge Function deployment/origin configuration, and leaked-password protection remain outstanding.
