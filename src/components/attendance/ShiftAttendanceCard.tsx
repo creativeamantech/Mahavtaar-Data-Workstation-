@@ -9,19 +9,30 @@ import { punchIn, punchOut, startBreak, endBreak } from '@/lib/repositories/atte
 import { Clock, LogIn, LogOut, Coffee, Play, CheckCircle2 } from 'lucide-react';
 import { format, parseISO, differenceInMinutes } from 'date-fns';
 import { toast } from 'sonner';
+import { getTodayAttendance } from '@/lib/repositories/attendanceRepository';
+import { isCloudFirstEnabled } from '@/lib/cloudRepository';
 
 export function ShiftAttendanceCard() {
   const { user } = useAuth();
   const todayDateStr = format(new Date(), 'yyyy-MM-dd');
 
-  const todayLog = useLiveQuery(
+  const localTodayLog = useLiveQuery(
     async () => {
-      if (!user) return undefined;
+      if (!user || isCloudFirstEnabled()) return undefined;
       const logs = await db.attendance_logs.where('userId').equals(user.id).toArray();
       return logs.find(l => l.date === todayDateStr);
     },
     [user, todayDateStr]
   );
+  const [cloudTodayLog, setCloudTodayLog] = useState<AttendanceLog | undefined>();
+  useEffect(() => {
+    if (!user || !isCloudFirstEnabled()) return;
+    let active = true;
+    getTodayAttendance(user.id, todayDateStr).then(row => { if (active) setCloudTodayLog(row); })
+      .catch(error => { if (active) toast.error(error instanceof Error ? error.message : 'Unable to load attendance.'); });
+    return () => { active = false; };
+  }, [user, todayDateStr]);
+  const todayLog = isCloudFirstEnabled() ? cloudTodayLog : localTodayLog;
 
   const [currentTime, setCurrentTime] = useState(new Date());
 
