@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -16,6 +16,8 @@ import { ScrollArea } from '../components/ui/scroll-area';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { FeedbackModal } from '../components/feedback/FeedbackModal';
+import { getFeedbackByAgreementId } from '../lib/repositories/feedbackRepository';
+import { isCloudFirstEnabled } from '../lib/cloudRepository';
 
 const STANDARD_STATUSES = [
   "Paid", "PTP", "CB", "RTP", "RNR", "Non Contactable", 
@@ -35,14 +37,24 @@ export default function CustomerDetail() {
   const { records } = useData();
   const { user } = useAuth();
   
-  const feedbacks = useLiveQuery(
+  const localFeedbacks = useLiveQuery(
     async () => {
-      if (!id) return [];
+      if (isCloudFirstEnabled() || !id) return [];
       return db.customer_feedbacks.where('agreementid').equals(id).reverse().sortBy('createdAt');
     },
     [id],
     [] as CustomerFeedback[]
   );
+  const [cloudFeedbacks, setCloudFeedbacks] = useState<CustomerFeedback[]>([]);
+  useEffect(() => {
+    if (!isCloudFirstEnabled() || !id) return;
+    let active = true;
+    getFeedbackByAgreementId(id)
+      .then(rows => { if (active) setCloudFeedbacks(rows); })
+      .catch(error => toast.error(error instanceof Error ? error.message : 'Unable to load customer feedback.'));
+    return () => { active = false; };
+  }, [id]);
+  const feedbacks = isCloudFirstEnabled() ? cloudFeedbacks : (localFeedbacks || []);
 
   
   
