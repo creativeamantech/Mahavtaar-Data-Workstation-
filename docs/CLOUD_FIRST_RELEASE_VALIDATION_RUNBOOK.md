@@ -112,4 +112,4 @@ A dry-run must be read-only. The commit step must require an explicit administra
 ## Follow-up verification (2026-10-29, history pagination)
 
 - Cloud upload history and audit history now also use explicit 1,000-row pagination with stable secondary ordering. The previous audit-history hard cap of 5,000 rows is removed.
-- CI run #109 passed on code commit `45b5c8e0df3f2db3611dbb212ee128dbb7ca94f1` (dependency lockfile check, install, production build, unit tests, lint). The later pagination commit `402c707690da6b353f48889f636069794109038f` still requires its own CI result.
+- CI run #112 passed on commit `3f4fbb53cbec05bce1cd97eaa309c118f6300f1d`, including the cloud history pagination changes (dependency lockfile check, install, production build, unit tests, lint). The runbook-only update that follows this entry is documentation-only.
