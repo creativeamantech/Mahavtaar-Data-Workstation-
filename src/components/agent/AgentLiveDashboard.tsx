@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "../../contexts/AuthContext";
 import { useData } from "../../contexts/DataContext";
-import { LoanRecord, CustomerFeedback, db } from "../../lib/db";
+import { LoanRecord, CustomerFeedback } from "../../lib/db";
 import { format, isToday, parseISO, formatDistanceToNow } from "date-fns";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
@@ -10,10 +10,12 @@ import { AgentLiveDetailsSheet } from "./AgentLiveDetailsSheet";
 import { Badge } from "../ui/badge";
 import { ScrollArea } from "../ui/scroll-area";
 import { Link } from 'react-router-dom';
-import { MessageSquare, IndianRupee as Rupee, UserCheck, Users, Clock } from "lucide-react";
+import { MessageSquare, IndianRupee as Rupee, UserCheck, Users, Clock, CheckCircle2 } from "lucide-react";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { punchIn, punchOut, startBreak, endBreak, getTodayAttendance } from "../../lib/repositories/attendanceRepository";
+import { getAllFeedbacks } from "../../lib/repositories/feedbackRepository";
 
 export function AgentLiveDashboard() {
     const { user } = useAuth();
@@ -31,75 +33,75 @@ export function AgentLiveDashboard() {
   useEffect(() => {
     if (!user) return;
     const today = new Date().toISOString().slice(0, 10);
-    db.attendance_logs.where({ userId: user.id, date: today }).first().then(record => {
+    getTodayAttendance(user.id, today).then(record => {
       setAttendanceRecord(record || null);
-    });
+    }).catch(error => toast.error(error instanceof Error ? error.message : 'Unable to load attendance.'));
   }, [user]);
 
   const handlePunchIn = async () => {
     if (!user) return;
     setIsPunching(true);
-    const today = new Date().toISOString().slice(0, 10);
-    const id = crypto.randomUUID();
-    const newRecord = {
-      id,
-      userId: user.id,
-      userName: user.name,
-      date: today,
-      loginTime: new Date().toISOString(),
-      breakDuration: 0
-    };
-    await db.attendance_logs.add(newRecord);
-    setAttendanceRecord(newRecord);
-    setIsPunching(false);
-    toast.success('Punched in successfully!');
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const newRecord = await punchIn(user.id, user.name, today);
+      setAttendanceRecord(newRecord);
+      toast.success('Punched in successfully!');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Punch in failed.');
+    } finally {
+      setIsPunching(false);
+    }
   };
 
   const handlePunchOut = async () => {
     if (!attendanceRecord) return;
     setIsPunching(true);
-    const updated = { ...attendanceRecord, logoutTime: new Date().toISOString() };
-    await db.attendance_logs.put(updated);
-    setAttendanceRecord(updated);
-    setIsPunching(false);
-    toast.success('Punched out successfully!');
+    try {
+      const updated = await punchOut(attendanceRecord.id);
+      setAttendanceRecord(updated || null);
+      toast.success('Punched out successfully!');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Punch out failed.');
+    } finally {
+      setIsPunching(false);
+    }
   };
 
   const handleBreakStart = async () => {
     if (!attendanceRecord) return;
     setIsPunching(true);
-    const updated = { ...attendanceRecord, currentBreakStart: new Date().toISOString() };
-    await db.attendance_logs.put(updated);
-    setAttendanceRecord(updated);
-    setIsPunching(false);
-    toast.success('Break started');
+    try {
+      const updated = await startBreak(attendanceRecord.id);
+      setAttendanceRecord(updated || null);
+      toast.success('Break started');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to start break.');
+    } finally {
+      setIsPunching(false);
+    }
   };
 
   const handleBreakEnd = async () => {
     if (!attendanceRecord || !attendanceRecord.currentBreakStart) return;
     setIsPunching(true);
-    const endTime = new Date();
-    const startTime = parseISO(attendanceRecord.currentBreakStart);
-    const breakMins = Math.round((endTime.getTime() - startTime.getTime()) / 60000);
-    const updated = { 
-        ...attendanceRecord, 
-        breakDuration: (attendanceRecord.breakDuration || 0) + breakMins
-    };
-    delete updated.currentBreakStart;
-    
-    await db.attendance_logs.put(updated);
-    setAttendanceRecord(updated);
-    setIsPunching(false);
-    toast.success('Break ended');
+    try {
+      const updated = await endBreak(attendanceRecord.id);
+      setAttendanceRecord(updated || null);
+      toast.success('Break ended');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to end break.');
+    } finally {
+      setIsPunching(false);
+    }
   };
 
 
 
     useEffect(() => {
         if (user) {
-            db.customer_feedbacks.where('agentId').equals(user.id).toArray().then(fbs => {
-                setFeedbacks(fbs);
-            });
+            getAllFeedbacks().then(fbs => {
+                setFeedbacks(fbs.filter(f => f.agentId === user.id));
+            }).catch(error => toast.error(error instanceof Error ? error.message : 'Unable to load feedback.'));
         }
     }, [user]);
 

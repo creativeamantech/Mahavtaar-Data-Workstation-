@@ -18,12 +18,17 @@ import { cn } from '../lib/utils';
 import { TargetInput } from '../components/TargetInput';
 import { SystemHealthDiagnostics } from '../components/settings/SystemHealthDiagnostics';
 import { SupabaseDatabaseSection } from '../components/sync/SupabaseDatabaseSection';
+import { isCloudFirstEnabled } from '../lib/cloudRepository';
 
 
 function SystemTab() {
   const [isResetting, setIsResetting] = useState(false);
   
   const handleBackup = async () => {
+    if (isCloudFirstEnabled()) {
+      toast.error('This backup tool only exports local device data. Use the approved Supabase backup process for cloud data.');
+      return;
+    }
     try {
       await backupSystemData();
       toast.success('System backup downloaded successfully');
@@ -33,6 +38,11 @@ function SystemTab() {
   };
 
   const handleRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isCloudFirstEnabled()) {
+      toast.error('Local restore is disabled in cloud-first mode to prevent misleading or destructive restores.');
+      e.target.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -53,6 +63,10 @@ function SystemTab() {
   };
 
   const handleReset = async () => {
+    if (isCloudFirstEnabled()) {
+      toast.error('Factory reset is disabled in cloud-first mode. It must not be used as a cloud data deletion tool.');
+      return;
+    }
     if (!confirm("WARNING: This will delete ALL data (users, feedback, records). Type 'RESET' to confirm.")) return;
     try {
       setIsResetting(true);
@@ -70,18 +84,19 @@ function SystemTab() {
       <div className="bg-card border rounded-lg p-6 space-y-4">
         <div>
           <h3 className="text-lg font-semibold">Data Backup & Restore</h3>
-          <p className="text-sm text-muted-foreground mb-4">Download a complete JSON backup of all system data or restore from an existing backup file.</p>
+          <p className="text-sm text-muted-foreground mb-4">{isCloudFirstEnabled() ? 'Cloud-first mode is active. The local JSON backup and restore tools do not back up or restore Supabase data and are disabled for safety.' : 'Download a complete JSON backup of all system data or restore from an existing backup file.'}</p>
           <div className="flex items-center gap-4">
-            <Button onClick={handleBackup}>Download Full Backup</Button>
+            <Button onClick={handleBackup} disabled={isCloudFirstEnabled()}>Download Full Backup</Button>
             <div className="relative">
               <input
                 type="file"
                 accept=".json"
                 onChange={handleRestore}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
                 title="Restore from JSON Backup"
+                disabled={isCloudFirstEnabled()}
               />
-              <Button variant="outline">Restore Backup</Button>
+              <Button variant="outline" disabled={isCloudFirstEnabled()}>Restore Backup</Button>
             </div>
           </div>
         </div>
@@ -90,7 +105,7 @@ function SystemTab() {
         <div>
           <h3 className="text-lg font-semibold text-red-600 dark:text-red-400">Danger Zone</h3>
           <p className="text-sm text-muted-foreground mb-4">Permanently wipe all data from this device. This cannot be undone.</p>
-          <Button variant="destructive" onClick={handleReset} disabled={isResetting}>
+          <Button variant="destructive" onClick={handleReset} disabled={isResetting || isCloudFirstEnabled()}>
             {isResetting ? 'Resetting...' : 'Factory Reset System'}
           </Button>
         </div>
@@ -107,6 +122,10 @@ function UserManagementTab() {
   const [confirmWipe, setConfirmWipe] = useState(false);
   
   const handleWipeDatabase = async () => {
+    if (isCloudFirstEnabled()) {
+      toast.error('Local database wipe is disabled in cloud-first mode.');
+      return;
+    }
     if (!confirmWipe) {
       setConfirmWipe(true);
       toast('Click CONFIRM WIPE again to confirm deletion', { duration: 4000 });
@@ -134,38 +153,48 @@ function UserManagementTab() {
 
   const handleSave = async (data: Partial<User>) => {
     const role = (data.role || 'VIEWER') as Role;
-    const views = data.permissions?.views && data.permissions.views.length > 0 
-      ? data.permissions.views 
+    const views = data.permissions?.views && data.permissions.views.length > 0
+      ? data.permissions.views
       : (DEFAULT_PERMISSIONS[role] || []);
 
-    if (editingUser) {
-        await updateUser(editingUser.id, { 
-            name: data.name, 
-            email: data.email, 
-            role: role, 
-            permissions: { views },
-            assignedExecutiveName: data.assignedExecutiveName,
-            maintenanceMode: (data as any).maintenanceMode
+    try {
+      if (editingUser) {
+        await updateUser(editingUser.id, {
+          name: data.name,
+          email: data.email,
+          role,
+          permissions: { views },
+          assignedExecutiveName: data.assignedExecutiveName,
+          maintenanceMode: (data as any).maintenanceMode,
+          password: data.password || undefined,
         });
-        toast.success('User updated successfully');
-    } else {
+        toast.success(isCloudFirstEnabled() ? 'Cloud user updated successfully' : 'User updated successfully');
+      } else {
         await addUser({
-            name: data.name!,
-            email: data.email!,
-            role: role,
-            password: data.password || undefined,
-            permissions: { views },
-            assignedExecutiveName: data.assignedExecutiveName,
+          name: data.name!,
+          email: data.email!,
+          role,
+          password: data.password || undefined,
+          permissions: { views },
+          assignedExecutiveName: data.assignedExecutiveName,
         });
-        toast.success('User created successfully');
+        toast.success(isCloudFirstEnabled() ? 'Cloud user created successfully' : 'User created successfully');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to save user');
+      throw error;
     }
   };
 
   const handleDelete = async (id: string) => {
     if (id === currentUser?.id) return toast.error("Cannot delete yourself");
-    if (!confirm('Delete user?')) return;
-    await deleteUser(id);
-    toast.success('User deleted');
+    if (!confirm(isCloudFirstEnabled() ? 'Permanently delete this Supabase Auth account?' : 'Delete user?')) return;
+    try {
+      await deleteUser(id);
+      toast.success(isCloudFirstEnabled() ? 'Cloud user deleted' : 'User deleted');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to delete user');
+    }
   };
 
   const columns = [
@@ -207,12 +236,16 @@ function UserManagementTab() {
       <div className="flex justify-between">
         <h2 className="text-lg font-semibold">User Management</h2>
         <div className="flex gap-2">
-          <Button variant="destructive" onClick={handleWipeDatabase}>
+          {!isCloudFirstEnabled() && <Button variant="destructive" onClick={handleWipeDatabase}>
             {confirmWipe ? 'CONFIRM WIPE' : 'Wipe Database'}
-          </Button>
+          </Button>}
           <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" /> Add User</Button>
         </div>
       </div>
+      {isCloudFirstEnabled() && <div className="rounded-lg border border-sky-500/40 bg-sky-500/5 p-4 text-sm">
+        <strong>Supabase cloud user management</strong>
+        <p className="mt-1 text-muted-foreground">Changes are sent to the secured admin-users Edge Function. The function must be deployed and configured for these actions to work.</p>
+      </div>}
       <DataTable columns={columns} data={users} pageSize={20} />
       
       <UserFormSheet 

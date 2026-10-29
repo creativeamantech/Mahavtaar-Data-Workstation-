@@ -5,6 +5,8 @@ import { useAuth } from './AuthContext';
 import { atomicFileImport, atomicUpdateLoanRecord, atomicBulkUpdateLoanRecords } from '../lib/repositories/loanRepository';
 import { setTargetRecord, deleteTargetRecord } from '../lib/repositories/targetRepository';
 import { SyncEngine } from '../lib/sync/SyncEngine';
+import { toast } from 'sonner';
+import { cloudFetchAudit, cloudFetchLoans, cloudFetchTargets, cloudFetchUploads, cloudSaveTarget, cloudSaveUpload, cloudUpsertLoans, cloudUpdateLoan, cloudBulkUpdateLoans, isCloudFirstEnabled } from '../lib/cloudRepository';
 
 interface DataContextType {
   isLoading: boolean;
@@ -62,10 +64,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
   }, [records]);
 
-  // Start local-first journal transport while a user session is active.
-  // This transport is same-origin tabs only; it does not provide internet relay.
+  // Local peer-mesh transport is disabled in cloud-first mode.
   useEffect(() => {
-    if (!user) return;
+    if (!user || isCloudFirstEnabled()) return;
 
     let active = true;
     const refreshFromLocalDb = async () => {
@@ -102,9 +103,42 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
-  // Load from Dexie on mount
+  // Load from the authoritative store. Cloud mode must never silently fall back to IndexedDB.
   useEffect(() => {
+    let active = true;
     async function loadData() {
+      if (isCloudFirstEnabled()) {
+        try {
+          if (!user) {
+            setRecords([]);
+            setTargets({});
+            setUploadHistory([]);
+            setAuditLog([]);
+            return;
+          }
+          const [cloudRecords, cloudTargets, cloudUploads, cloudAudit] = await Promise.all([
+            cloudFetchLoans(), cloudFetchTargets(), cloudFetchUploads(), cloudFetchAudit(),
+          ]);
+          if (!active) return;
+          const scopedRecords = user.role === 'EXECUTIVE'
+            ? cloudRecords.filter(r => {
+                const targets = [user.assignedExecutiveName, user.name].filter(Boolean).map(v => String(v).trim().toLowerCase());
+                const raw = String(r.executive_name || r['Executive Name'] || r.EXECUTIVE_NAME || r.FOS_Name || r['FOS Name'] || r.fos || r.FOS || r.executive || '').trim().toLowerCase();
+                return !!raw && targets.some(t => raw === t || raw.includes(t) || t.includes(raw));
+              })
+            : cloudRecords;
+          setRecords(scopedRecords);
+          setTargets(cloudTargets.reduce((acc, row) => { acc[row.key] = row.pct; return acc; }, {} as Record<string, number>));
+          setUploadHistory(cloudUploads);
+          setAuditLog(cloudAudit);
+        } catch (error) {
+          console.error('[DataContext] cloud load failed; local fallback intentionally disabled', error);
+          toast.error(error instanceof Error ? error.message : 'Unable to load cloud data. Check your connection and access.');
+        } finally {
+          if (active) setIsLoading(false);
+        }
+        return;
+      }
       // 1. Migrate legacy localStorage targets if present
       try {
         const savedTargetsStr = localStorage.getItem('app_targets');
@@ -150,6 +184,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }
     }
     loadData();
+    return () => { active = false; };
   }, [user]);
 
   const loadMainFile = useCallback(async (buffer: ArrayBuffer, fileName: string, userName: string) => {
@@ -165,13 +200,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
       };
     });
     const entry = { id: crypto.randomUUID(), type: 'MAIN_DATA', fileName, recordCount: normalizedRecords.length, uploadedBy: userName, createdAt: new Date().toISOString() };
+    if (isCloudFirstEnabled()) {
+      await cloudUpsertLoans(normalizedRecords);
+      await cloudSaveUpload(entry as UploadSession);
+    } else {
+      await atomicFileImport(normalizedRecords, entry as UploadSession);
+    }
     setUploadHistory(prev => [entry, ...prev]);
     
-    await atomicFileImport(normalizedRecords, entry as UploadSession);
-    
-    const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
-    const dbRecords = await fetchAuthorizedLoanRecords(user);
-    setRecords(dbRecords);
+    if (isCloudFirstEnabled()) {
+      setRecords(await cloudFetchLoans());
+    } else {
+      const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
+      setRecords(await fetchAuthorizedLoanRecords(user));
+    }
     
     return { rowCount: normalizedRecords.length };
   }, [user]);
@@ -180,18 +222,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const paidRows = parsePaidFile(buffer);
     let matched = 0;
     
-    const allDbRecords = await db.loan_records.toArray();
+    const allDbRecords = isCloudFirstEnabled() ? await cloudFetchLoans() : await db.loan_records.toArray();
     const mergedData = mergePaidIntoRecords(allDbRecords, paidRows);
     matched = paidRows.filter(p => allDbRecords.some(r => r.agreementid === p.agreementid)).length;
     
     const entry = { id: crypto.randomUUID(), type: 'PAID_FILE', fileName, recordCount: paidRows.length, uploadedBy: userName, createdAt: new Date().toISOString() };
+    if (isCloudFirstEnabled()) {
+      await cloudUpsertLoans(mergedData);
+      await cloudSaveUpload(entry as UploadSession);
+    } else {
+      await atomicFileImport(mergedData, entry as UploadSession);
+    }
     setUploadHistory(prev => [entry, ...prev]);
     
-    await atomicFileImport(mergedData, entry as UploadSession);
-    
-    const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
-    const dbRecords = await fetchAuthorizedLoanRecords(user);
-    setRecords(dbRecords);
+    if (isCloudFirstEnabled()) {
+      setRecords(await cloudFetchLoans());
+    } else {
+      const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
+      setRecords(await fetchAuthorizedLoanRecords(user));
+    }
     
     return { matched, total: paidRows.length }; 
   }, [user]);
@@ -199,18 +248,21 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const loadAdditionalFile = useCallback(async (buffer: ArrayBuffer, fileName: string, userName: string) => {
     const additionalRows = parseAdditionalFile(buffer);
     
-    const allDbRecords = await db.loan_records.toArray();
+    const allDbRecords = isCloudFirstEnabled() ? await cloudFetchLoans() : await db.loan_records.toArray();
     const { merged, stats } = mergeAdditionalIntoRecords(allDbRecords, additionalRows);
     const matched = additionalRows.filter(p => allDbRecords.some(r => r.agreementid === p.agreementid)).length;
     
     const entry = { id: crypto.randomUUID(), type: 'ADDITIONAL_COLLECTION_FILE', fileName, recordCount: additionalRows.length, uploadedBy: userName, createdAt: new Date().toISOString() };
+    if (isCloudFirstEnabled()) {
+      await cloudUpsertLoans(merged);
+      await cloudSaveUpload(entry as UploadSession);
+      setRecords(await cloudFetchLoans());
+    } else {
+      await atomicFileImport(merged, entry as UploadSession);
+      const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
+      setRecords(await fetchAuthorizedLoanRecords(user));
+    }
     setUploadHistory(prev => [entry, ...prev]);
-    
-    await atomicFileImport(merged, entry as UploadSession);
-    
-    const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
-    const dbRecords = await fetchAuthorizedLoanRecords(user);
-    setRecords(dbRecords);
     
     return { matched, total: additionalRows.length, stats };
   }, [user]);
@@ -218,17 +270,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const loadCorrectedFile = useCallback(async (buffer: ArrayBuffer, fileName: string, userName: string) => {
     const correctedRows = parseCorrectedFile(buffer);
     
-    const allDbRecords = await db.loan_records.toArray();
+    const allDbRecords = isCloudFirstEnabled() ? await cloudFetchLoans() : await db.loan_records.toArray();
     const { merged, matched } = mergeCorrectedIntoRecords(allDbRecords, correctedRows);
     
     const entry = { id: crypto.randomUUID(), type: 'CORRECTED_DAC_FILE', fileName, recordCount: correctedRows.length, uploadedBy: userName, createdAt: new Date().toISOString() };
+    if (isCloudFirstEnabled()) {
+      await cloudUpsertLoans(merged);
+      await cloudSaveUpload(entry as UploadSession);
+      setRecords(await cloudFetchLoans());
+    } else {
+      await atomicFileImport(merged, entry as UploadSession);
+      const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
+      setRecords(await fetchAuthorizedLoanRecords(user));
+    }
     setUploadHistory(prev => [entry, ...prev]);
-    
-    await atomicFileImport(merged, entry as UploadSession);
-    
-    const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
-    const dbRecords = await fetchAuthorizedLoanRecords(user);
-    setRecords(dbRecords);
     
     return { matched, total: correctedRows.length };
   }, [user]);
@@ -236,13 +291,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const updateRecord = useCallback(async (agreementid: string, field: string, value: any, userName: string) => {
     let oldVal = '';
     
-    setRecords(prev => prev.map(r => {
-      if (r.agreementid === agreementid) {
-        oldVal = String(r[field] ?? '');
-        return { ...r, [field]: value, [`${field}_source`]: 'MANUAL' };
-      }
-      return r;
-    }));
+    const existingRecord = records.find(r => r.agreementid === agreementid);
+    oldVal = String(existingRecord?.[field] ?? '');
+    const updatePayload = { [field]: value, [`${field}_source`]: 'MANUAL' };
+    if (isCloudFirstEnabled()) {
+      await cloudUpdateLoan(agreementid, updatePayload, userName);
+    } else {
+      await atomicUpdateLoanRecord(agreementid, updatePayload, { userName, userRole: user?.role || 'VIEWER', source: 'MANUAL' });
+    }
+    setRecords(prev => prev.map(r => r.agreementid === agreementid ? { ...r, ...updatePayload } : r));
     
     const audit = {
       id: crypto.randomUUID(),
@@ -257,75 +314,50 @@ export function DataProvider({ children }: { children: ReactNode }) {
     
     setAuditLog(a => [audit, ...a]);
     
-    await atomicUpdateLoanRecord(
-      agreementid,
-      { [field]: value, [`${field}_source`]: 'MANUAL' },
-      { userName, userRole: user?.role || 'VIEWER', source: 'MANUAL' }
-    );
-    
     setUndoStack(prev => [...prev, { type: 'UPDATE', audits: [audit] }]);
     setRedoStack([]);
-  }, [user]);
+  }, [user, records]);
 
 
   const bulkUpdateRecords = useCallback(async (updates: {agreementid: string, field: string, value: any}[], userName: string) => {
+    const updateMap = new Map<string, Record<string, any>>();
+    updates.forEach(item => {
+      if (!updateMap.has(item.agreementid)) updateMap.set(item.agreementid, {});
+      updateMap.get(item.agreementid)![item.field] = item.value;
+      updateMap.get(item.agreementid)![item.field + '_source'] = 'MANUAL';
+    });
     const newAudits: AuditEntry[] = [];
-    const updateMap = new Map();
-    
-    updates.forEach(u => {
-      if (!updateMap.has(u.agreementid)) {
-        updateMap.set(u.agreementid, {});
+    for (const [agreementid, payload] of updateMap.entries()) {
+      const existing = records.find(row => row.agreementid === agreementid);
+      if (!existing) continue;
+      for (const [field, value] of Object.entries(payload)) {
+        if (!field.endsWith('_source')) newAudits.push({
+          id: crypto.randomUUID(), agreementid, field,
+          oldValue: String(existing[field] ?? ''), newValue: String(value ?? ''),
+          changedBy: userName, createdAt: new Date().toISOString(), source: 'BULK_OPERATION',
+        });
       }
-      updateMap.get(u.agreementid)[u.field] = u.value;
-      updateMap.get(u.agreementid)[`${u.field}_source`] = 'MANUAL';
-    });
-
-    setRecords(prev => {
-      const next = prev.map(r => {
-        if (updateMap.has(r.agreementid)) {
-          const u = updateMap.get(r.agreementid);
-          
-          Object.keys(u).forEach(key => {
-            if (!key.endsWith('_source')) {
-              newAudits.push({
-                id: crypto.randomUUID(),
-                agreementid: r.agreementid,
-                field: key,
-                oldValue: String(r[key] ?? ''),
-                newValue: String(u[key]),
-                changedBy: userName,
-                createdAt: new Date().toISOString(),
-                source: 'MANUAL',
-              });
-            }
-          });
-          
-          return { ...r, ...u };
-        }
-        return r;
-      });
-      return next;
-    });
-
-    setAuditLog(a => [...newAudits, ...a]);
-
-    const formattedUpdates = Array.from(updateMap.entries()).map(([agreementId, upds]) => ({
-      agreementId,
-      updates: upds
-    }));
-
-    await atomicBulkUpdateLoanRecords(
-      formattedUpdates,
-      { userName, userRole: user?.role || 'VIEWER', source: 'BULK_OPERATION' }
-    );
-
+    }
+    const formattedUpdates = Array.from(updateMap.entries()).map(([agreementId, payload]) => ({ agreementId, updates: payload }));
+    if (isCloudFirstEnabled()) await cloudBulkUpdateLoans(formattedUpdates, userName);
+    else await atomicBulkUpdateLoanRecords(formattedUpdates, { userName, userRole: user?.role || 'VIEWER', source: 'BULK_OPERATION' });
+    setRecords(prev => prev.map(row => updateMap.has(row.agreementid) ? { ...row, ...updateMap.get(row.agreementid) } : row));
+    setAuditLog(prev => [...newAudits, ...prev]);
     setUndoStack(prev => [...prev, { type: 'BULK_UPDATE', audits: newAudits }]);
     setRedoStack([]);
-  }, [user]);
+  }, [user, records]);
 
   const setTarget = useCallback(async (key: string, pct: number, userName: string) => {
     const actor = userName || user?.name || 'System';
-    if (pct <= 0) {
+    if (isCloudFirstEnabled()) {
+      await cloudSaveTarget(key, pct, actor);
+      setTargets(prev => {
+        const next = { ...prev };
+        if (pct <= 0) delete next[key];
+        else next[key] = pct;
+        return next;
+      });
+    } else if (pct <= 0) {
       setTargets(prev => {
         const next = { ...prev };
         delete next[key];
@@ -342,70 +374,76 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const undo = useCallback(async () => {
     if (undoStack.length === 0) return;
     const action = undoStack[undoStack.length - 1];
-    setUndoStack(prev => prev.slice(0, -1));
-    setRedoStack(prev => [...prev, action]);
-
-    const updateMap = new Map();
+    const updateMap = new Map<string, Record<string, unknown>>();
     action.audits.forEach(a => {
       if (!updateMap.has(a.agreementid)) updateMap.set(a.agreementid, {});
-      updateMap.get(a.agreementid)[a.field] = a.oldValue;
-      updateMap.get(a.agreementid)[`${a.field}_source`] = 'UNDO'; // Mark as undone
+      updateMap.get(a.agreementid)![a.field] = a.oldValue;
+      updateMap.get(a.agreementid)![`${a.field}_source`] = 'UNDO';
     });
 
-    setRecords(prev => {
-      return prev.map(r => {
-        if (updateMap.has(r.agreementid)) {
-          const u = updateMap.get(r.agreementid);
-          return { ...r, ...u };
+    try {
+      if (updateMap.size > 0) {
+        const formattedUpdates = Array.from(updateMap.entries()).map(([agreementId, updates]) => ({
+          agreementId,
+          updates,
+        }));
+        if (isCloudFirstEnabled()) {
+          await cloudBulkUpdateLoans(formattedUpdates, user?.name || 'Unknown');
+        } else {
+          await atomicBulkUpdateLoanRecords(formattedUpdates, {
+            userName: user?.name || 'Unknown',
+            userRole: user?.role || 'VIEWER',
+            source: 'MANUAL',
+          });
         }
-        return r;
-      });
-    });
-
-    if (updateMap.size > 0) {
-      const formattedUpdates = Array.from(updateMap.entries()).map(([agreementId, upds]) => ({
-        agreementId,
-        updates: upds
+      }
+      // Only update the UI/history after persistence succeeds.
+      setRecords(prev => prev.map(row => {
+        const updates = updateMap.get(row.agreementid);
+        return updates ? { ...row, ...updates } : row;
       }));
-      await atomicBulkUpdateLoanRecords(
-        formattedUpdates,
-        { userName: user?.name || 'Unknown', userRole: user?.role || 'VIEWER', source: 'MANUAL' }
-      );
+      setUndoStack(prev => prev.slice(0, -1));
+      setRedoStack(prev => [...prev, action]);
+    } catch (error) {
+      toast.error(error instanceof Error ? `Undo failed: ${error.message}` : 'Undo failed. No changes were applied in the UI.');
     }
   }, [undoStack, user]);
 
   const redo = useCallback(async () => {
     if (redoStack.length === 0) return;
     const action = redoStack[redoStack.length - 1];
-    setRedoStack(prev => prev.slice(0, -1));
-    setUndoStack(prev => [...prev, action]);
-
-    const updateMap = new Map();
+    const updateMap = new Map<string, Record<string, unknown>>();
     action.audits.forEach(a => {
       if (!updateMap.has(a.agreementid)) updateMap.set(a.agreementid, {});
-      updateMap.get(a.agreementid)[a.field] = a.newValue;
-      updateMap.get(a.agreementid)[`${a.field}_source`] = 'MANUAL'; // Restore manual source
+      updateMap.get(a.agreementid)![a.field] = a.newValue;
+      updateMap.get(a.agreementid)![`${a.field}_source`] = 'MANUAL';
     });
 
-    setRecords(prev => {
-      return prev.map(r => {
-        if (updateMap.has(r.agreementid)) {
-          const u = updateMap.get(r.agreementid);
-          return { ...r, ...u };
+    try {
+      if (updateMap.size > 0) {
+        const formattedUpdates = Array.from(updateMap.entries()).map(([agreementId, updates]) => ({
+          agreementId,
+          updates,
+        }));
+        if (isCloudFirstEnabled()) {
+          await cloudBulkUpdateLoans(formattedUpdates, user?.name || 'Unknown');
+        } else {
+          await atomicBulkUpdateLoanRecords(formattedUpdates, {
+            userName: user?.name || 'Unknown',
+            userRole: user?.role || 'VIEWER',
+            source: 'MANUAL',
+          });
         }
-        return r;
-      });
-    });
-
-    if (updateMap.size > 0) {
-      const formattedUpdates = Array.from(updateMap.entries()).map(([agreementId, upds]) => ({
-        agreementId,
-        updates: upds
+      }
+      // Only update the UI/history after persistence succeeds.
+      setRecords(prev => prev.map(row => {
+        const updates = updateMap.get(row.agreementid);
+        return updates ? { ...row, ...updates } : row;
       }));
-      await atomicBulkUpdateLoanRecords(
-        formattedUpdates,
-        { userName: user?.name || 'Unknown', userRole: user?.role || 'VIEWER', source: 'MANUAL' }
-      );
+      setRedoStack(prev => prev.slice(0, -1));
+      setUndoStack(prev => [...prev, action]);
+    } catch (error) {
+      toast.error(error instanceof Error ? `Redo failed: ${error.message}` : 'Redo failed. No changes were applied in the UI.');
     }
   }, [redoStack, user]);
 

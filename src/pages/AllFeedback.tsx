@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { AppLayout } from '../components/layout/AppLayout';
 import { DataTable } from '../components/ui/DataTable';
 import { db, CustomerFeedback } from '../lib/db';
@@ -14,14 +14,29 @@ import Papa from 'papaparse';
 import { cn } from '@/lib/utils';
 import { DateRange } from 'react-day-picker';
 import { ALL_STANDARD_FEEDBACKS, AVAILABILITY_OPTIONS } from '../constants/feedbackConfig';
+import { getAllFeedbacks } from '../lib/repositories/feedbackRepository';
+import { isCloudFirstEnabled } from '../lib/cloudRepository';
+import { toast } from 'sonner';
 
 export default function AllFeedback() {
-  const feedbacks = useLiveQuery(
-    () => db.customer_feedbacks.orderBy('createdAt').reverse().toArray(),
+  const localFeedbacks = useLiveQuery(
+    () => isCloudFirstEnabled() ? Promise.resolve([]) : db.customer_feedbacks.orderBy('createdAt').reverse().toArray(),
     [],
     [] as CustomerFeedback[]
   );
-  const isLoading = feedbacks === undefined;
+  const [cloudFeedbacks, setCloudFeedbacks] = useState<CustomerFeedback[]>([]);
+  const [cloudLoading, setCloudLoading] = useState(true);
+  useEffect(() => {
+    if (!isCloudFirstEnabled()) { setCloudLoading(false); return; }
+    let active = true;
+    getAllFeedbacks()
+      .then(rows => { if (active) setCloudFeedbacks(rows); })
+      .catch(error => { if (active) toast.error(error instanceof Error ? error.message : 'Unable to load cloud feedback.'); })
+      .finally(() => { if (active) setCloudLoading(false); });
+    return () => { active = false; };
+  }, []);
+  const feedbacks = isCloudFirstEnabled() ? cloudFeedbacks : (localFeedbacks || []);
+  const isLoading = isCloudFirstEnabled() ? cloudLoading : localFeedbacks === undefined;
   
   // Filters
   const [availabilityFilter, setAvailabilityFilter] = useState<string>("ALL");

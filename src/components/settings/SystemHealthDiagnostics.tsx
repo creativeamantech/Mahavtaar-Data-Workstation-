@@ -3,12 +3,20 @@ import { runSystemIntegrityCheck, IntegrityReport } from '../../lib/integrityChe
 import { Button } from '../ui/button';
 import { ShieldCheck, AlertTriangle, XCircle, RefreshCw, Database, Activity, HardDrive, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { isCloudFirstEnabled } from '../../lib/cloudRepository';
 
 export function SystemHealthDiagnostics() {
   const [report, setReport] = useState<IntegrityReport | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const cloudFirst = isCloudFirstEnabled();
+
   const runAudit = async () => {
+    if (cloudFirst) {
+      setReport(null);
+      toast.info('These integrity diagnostics inspect local IndexedDB only and are unavailable in cloud-first mode.');
+      return;
+    }
     setLoading(true);
     try {
       const result = await runSystemIntegrityCheck();
@@ -28,8 +36,17 @@ export function SystemHealthDiagnostics() {
   };
 
   useEffect(() => {
-    runAudit();
-  }, []);
+    if (!cloudFirst) void runAudit();
+  }, [cloudFirst]);
+
+  if (cloudFirst) {
+    return (
+      <div className="rounded-lg border p-6 space-y-2 max-w-4xl">
+        <h2 className="text-lg font-semibold">Local Device Diagnostics</h2>
+        <p className="text-sm text-muted-foreground">Cloud-first mode is active. The integrity checker currently inspects local IndexedDB and local cryptographic hash chains only; it does not verify Supabase data. Cloud diagnostics are not yet available.</p>
+      </div>
+    );
+  }
 
   if (!report && loading) {
     return (
@@ -76,7 +93,7 @@ export function SystemHealthDiagnostics() {
               </span>
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              Last scanned {new Date(report.timestamp).toLocaleTimeString()} · IndexedDB local state engine
+              Last scanned {new Date(report.timestamp).toLocaleTimeString()} · Local IndexedDB state engine
             </p>
           </div>
         </div>

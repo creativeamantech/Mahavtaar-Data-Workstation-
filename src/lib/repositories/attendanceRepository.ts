@@ -7,17 +7,22 @@ import { db, AttendanceLog } from '../db';
 import { incrementLamportClock } from '../sync/journal';
 import { getLocalDeviceIdentity } from '../sync/deviceIdentity';
 import { ValidationError } from '../errors';
+import { cloudFetchAttendance, cloudSaveAttendance, cloudPunchIn, isCloudFirstEnabled } from '../cloudRepository';
 
 export async function getAttendanceByUserId(userId: string): Promise<AttendanceLog[]> {
+  if (isCloudFirstEnabled()) return (await cloudFetchAttendance()).filter(row => row.userId === userId).sort((a, b) => b.date.localeCompare(a.date));
   return await db.attendance_logs.where('userId').equals(userId).reverse().sortBy('date');
 }
 
 export async function getAllAttendance(): Promise<AttendanceLog[]> {
+  if (isCloudFirstEnabled()) return (await cloudFetchAttendance()).sort((a, b) => b.date.localeCompare(a.date));
   return await db.attendance_logs.reverse().sortBy('date');
 }
 
 export async function getTodayAttendance(userId: string, todayDateStr: string): Promise<AttendanceLog | undefined> {
-  const records = await db.attendance_logs.where('userId').equals(userId).toArray();
+  const records = isCloudFirstEnabled()
+    ? (await cloudFetchAttendance()).filter(row => row.userId === userId)
+    : await db.attendance_logs.where('userId').equals(userId).toArray();
   return records.find(r => r.date === todayDateStr);
 }
 
@@ -46,6 +51,8 @@ export async function punchIn(
     breakDuration: 0,
   };
 
+  if (isCloudFirstEnabled()) return await cloudPunchIn(newLog);
+
   await db.transaction('rw', [db.attendance_logs, db.sync_journal], async () => {
     await db.attendance_logs.put(newLog);
 
@@ -73,7 +80,9 @@ export async function punchIn(
 export async function punchOut(
   attendanceId: string
 ): Promise<AttendanceLog | undefined> {
-  const existing = await db.attendance_logs.get(attendanceId);
+  const existing = isCloudFirstEnabled()
+    ? (await cloudFetchAttendance()).find(row => row.id === attendanceId)
+    : await db.attendance_logs.get(attendanceId);
   if (!existing) return undefined;
 
   const nowIso = new Date().toISOString();
@@ -81,6 +90,8 @@ export async function punchOut(
     ...existing,
     logoutTime: nowIso,
   };
+
+  if (isCloudFirstEnabled()) return await cloudSaveAttendance(updatedLog);
 
   await db.transaction('rw', [db.attendance_logs, db.sync_journal], async () => {
     await db.attendance_logs.put(updatedLog);
@@ -109,7 +120,9 @@ export async function punchOut(
 export async function startBreak(
   attendanceId: string
 ): Promise<AttendanceLog | undefined> {
-  const existing = await db.attendance_logs.get(attendanceId);
+  const existing = isCloudFirstEnabled()
+    ? (await cloudFetchAttendance()).find(row => row.id === attendanceId)
+    : await db.attendance_logs.get(attendanceId);
   if (!existing || existing.currentBreakStart) return existing;
 
   const nowIso = new Date().toISOString();
@@ -117,6 +130,8 @@ export async function startBreak(
     ...existing,
     currentBreakStart: nowIso,
   };
+
+  if (isCloudFirstEnabled()) return await cloudSaveAttendance(updatedLog);
 
   await db.transaction('rw', [db.attendance_logs, db.sync_journal], async () => {
     await db.attendance_logs.put(updatedLog);
@@ -145,7 +160,9 @@ export async function startBreak(
 export async function endBreak(
   attendanceId: string
 ): Promise<AttendanceLog | undefined> {
-  const existing = await db.attendance_logs.get(attendanceId);
+  const existing = isCloudFirstEnabled()
+    ? (await cloudFetchAttendance()).find(row => row.id === attendanceId)
+    : await db.attendance_logs.get(attendanceId);
   if (!existing || !existing.currentBreakStart) return existing;
 
   const nowIso = new Date().toISOString();
@@ -158,6 +175,8 @@ export async function endBreak(
     currentBreakStart: undefined,
     breakDuration: newTotalBreak,
   };
+
+  if (isCloudFirstEnabled()) return await cloudSaveAttendance(updatedLog);
 
   await db.transaction('rw', [db.attendance_logs, db.sync_journal], async () => {
     await db.attendance_logs.put(updatedLog);
