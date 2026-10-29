@@ -44,6 +44,8 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 
 ### Phase 2 — Cloud repositories
 - Typed Supabase repositories exist for loans, feedback, attendance, targets, upload sessions, and audit events; direct IndexedDB call sites still need a complete audit.
+- Executive attendance history now uses the attendance repository instead of reading IndexedDB directly.
+- The audit log's local cryptographic-chain verifier is disabled in cloud-first mode until cloud audit-chain metadata and verification are implemented; this avoids reporting a misleading local-only result.
 - Move list, detail, search/filter, create/update, import, and report flows to those repositories.
 - Keep IndexedDB only for explicitly local preferences, temporary import staging, and a future opt-in offline cache.
 - Ensure imports are validated and committed in bounded transactions/batches with progress and actionable error reporting.
@@ -74,7 +76,7 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 
 ## Live verification (2026-10-29)
 
-- GitHub Actions CI run `40812191880` completed successfully for the earlier commit `02a55bbd16c6ead33e560812bca6435ec7c3697f`. After the feedback-history cloud-routing fixes, new CI run `40813358197` was observed in progress; do not treat the new commit as verified until that run completes.
+- GitHub Actions CI run `40813648520` completed successfully for commit `e99bc4ac266648a1ffd7927a0c1c4205fb20c8b8`, including dependency lockfile sync, install, production build, unit tests, and lint. The subsequent audit-verification guard commit must pass CI before it is treated as verified.
 - The Supabase security advisor currently reports `auth_leaked_password_protection` as a warning. Enable leaked-password protection in the Supabase Auth security settings before production use: https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
 - The live `pg_policies` inspection showed the expected role-specific policies on loan records, feedback, attendance, targets, upload history, audit log, and user profiles. This verifies policy presence only; it does **not** replace real-user authorization tests.
 
