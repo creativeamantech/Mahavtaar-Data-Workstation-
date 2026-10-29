@@ -107,3 +107,9 @@ A dry-run must be read-only. The commit step must require an explicit administra
 - CI run #107 passed for the initial client integration commit `8df87fc1d74a31ec752bd16ccced4ac7c5338c28`. CI run #109 is running for migration commit `45b5c8e0df3f2db3611dbb212ee128dbb7ca94f1`; wait for the final result before calling the exact head validated.
 - The security advisor still reports leaked-password protection disabled. Enable it in Supabase Dashboard before production use.
 - This does not complete release readiness: no authenticated role-based E2E evidence, no full repository-wide IndexedDB call-site audit, no migration dry-run/reconciliation exercise, and no final production origin for `admin-users` / `staff-directory` have been recorded. Cloud-first remains opt-in and must stay disabled until those gates pass.
+
+
+## Follow-up verification (2026-10-29, history pagination)
+
+- Cloud upload history and audit history now also use explicit 1,000-row pagination with stable secondary ordering. The previous audit-history hard cap of 5,000 rows is removed.
+- CI run #109 passed on code commit `45b5c8e0df3f2db3611dbb212ee128dbb7ca94f1` (dependency lockfile check, install, production build, unit tests, lint). The later pagination commit `402c707690da6b353f48889f636069794109038f` still requires its own CI result.
