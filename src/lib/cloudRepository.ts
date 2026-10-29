@@ -167,3 +167,46 @@ export async function cloudFetchAudit(): Promise<AuditEntry[]> {
 export function isCloudFirstEnabled(): boolean {
   return import.meta.env.VITE_CLOUD_FIRST_AUTH === 'true';
 }
+
+export async function cloudFetchAttendance(): Promise<import('./db').AttendanceLog[]> {
+  const { client } = await requireSignedInClient();
+  const { data, error } = await client.from('attendance_logs').select('*').order('date', { ascending: false });
+  if (error) throw new Error('Unable to load cloud attendance: ' + error.message);
+  return (data ?? []) as import('./db').AttendanceLog[];
+}
+
+export async function cloudSaveAttendance(row: import('./db').AttendanceLog): Promise<import('./db').AttendanceLog> {
+  const { client, user } = await requireSignedInClient();
+  if (row.userId !== user.id && user.app_metadata?.role !== 'ADMIN' && user.app_metadata?.role !== 'MANAGER') {
+    throw new Error('You may only update your own attendance record.');
+  }
+  const { data, error } = await client.from('attendance_logs').upsert(row, { onConflict: 'id' }).select('*').single();
+  if (error) throw new Error('Cloud attendance save failed: ' + error.message);
+  return data as import('./db').AttendanceLog;
+}
+
+export async function cloudFetchFeedbacks(): Promise<import('./db').CustomerFeedback[]> {
+  const { client } = await requireSignedInClient();
+  const { data, error } = await client.from('customer_feedbacks').select('*').order('createdAt', { ascending: false });
+  if (error) throw new Error('Unable to load cloud feedback: ' + error.message);
+  return (data ?? []).map((row: any) => ({
+    ...row,
+    ref1: row.ref1Availability || row.ref1Feedback ? { availability: row.ref1Availability || '', feedback: row.ref1Feedback || '' } : undefined,
+    ref2: row.ref2Availability || row.ref2Feedback ? { availability: row.ref2Availability || '', feedback: row.ref2Feedback || '' } : undefined,
+  })) as import('./db').CustomerFeedback[];
+}
+
+export async function cloudSaveFeedback(row: import('./db').CustomerFeedback): Promise<import('./db').CustomerFeedback> {
+  const { client, user } = await requireSignedInClient();
+  const role = user.app_metadata?.role;
+  if (row.agentId !== user.id && role !== 'ADMIN' && role !== 'MANAGER') {
+    throw new Error('You may only submit feedback under your own account.');
+  }
+  const record: Record<string, unknown> = { ...row };
+  if (row.ref1) { record.ref1Availability = row.ref1.availability; record.ref1Feedback = row.ref1.feedback; }
+  if (row.ref2) { record.ref2Availability = row.ref2.availability; record.ref2Feedback = row.ref2.feedback; }
+  delete record.ref1; delete record.ref2;
+  const { data, error } = await client.from('customer_feedbacks').upsert(record, { onConflict: 'id' }).select('*').single();
+  if (error) throw new Error('Cloud feedback save failed: ' + error.message);
+  return data as import('./db').CustomerFeedback;
+}
