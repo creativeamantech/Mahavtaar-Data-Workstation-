@@ -46,6 +46,7 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 - Typed Supabase repositories exist for loans, feedback, attendance, targets, upload sessions, and audit events; direct IndexedDB call sites still need a complete audit.
 - Executive attendance history now uses the attendance repository instead of reading IndexedDB directly.
 - The audit log's local cryptographic-chain verifier is disabled in cloud-first mode until cloud audit-chain metadata and verification are implemented; this avoids reporting a misleading local-only result.
+- System Health Diagnostics now explicitly shows a local-device-only notice in cloud-first mode and does not run the IndexedDB integrity checker against local data while presenting a cloud-first experience.
 - Move list, detail, search/filter, create/update, import, and report flows to those repositories.
 - Keep IndexedDB only for explicitly local preferences, temporary import staging, and a future opt-in offline cache.
 - Ensure imports are validated and committed in bounded transactions/batches with progress and actionable error reporting.
