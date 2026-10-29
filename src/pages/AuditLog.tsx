@@ -4,12 +4,14 @@ import { useData } from '../contexts/DataContext';
 import { fmtDate } from '../lib/formatters';
 import { Search, UserCircle, Edit3, ArrowRight, ShieldCheck, AlertCircle, RefreshCw } from 'lucide-react';
 import { verifyAuditChainIntegrity } from '../lib/repositories/auditRepository';
+import { isCloudFirstEnabled } from '../lib/cloudRepository';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
 
 export default function AuditLog() {
   const { auditLog } = useData();
+  const cloudFirst = isCloudFirstEnabled();
   const [search, setSearch] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState<{
@@ -25,6 +27,10 @@ export default function AuditLog() {
   }, [auditLog, search]);
 
   const handleVerifyChain = async () => {
+    if (cloudFirst) {
+      toast.info('Cloud audit verification is not available yet.');
+      return;
+    }
     setIsVerifying(true);
     try {
       const res = await verifyAuditChainIntegrity();
@@ -62,7 +68,7 @@ export default function AuditLog() {
             variant="outline"
             size="sm"
             onClick={handleVerifyChain}
-            disabled={isVerifying}
+            disabled={isVerifying || cloudFirst}
             className="gap-2 text-xs font-semibold"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isVerifying ? 'animate-spin' : ''}`} />
