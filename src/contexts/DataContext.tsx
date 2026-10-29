@@ -274,13 +274,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const { merged, matched } = mergeCorrectedIntoRecords(allDbRecords, correctedRows);
     
     const entry = { id: crypto.randomUUID(), type: 'CORRECTED_DAC_FILE', fileName, recordCount: correctedRows.length, uploadedBy: userName, createdAt: new Date().toISOString() };
+    if (isCloudFirstEnabled()) {
+      await cloudUpsertLoans(merged);
+      await cloudSaveUpload(entry as UploadSession);
+      setRecords(await cloudFetchLoans());
+    } else {
+      await atomicFileImport(merged, entry as UploadSession);
+      const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
+      setRecords(await fetchAuthorizedLoanRecords(user));
+    }
     setUploadHistory(prev => [entry, ...prev]);
-    
-    await atomicFileImport(merged, entry as UploadSession);
-    
-    const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
-    const dbRecords = await fetchAuthorizedLoanRecords(user);
-    setRecords(dbRecords);
     
     return { matched, total: correctedRows.length };
   }, [user]);
@@ -317,61 +320,32 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
 
   const bulkUpdateRecords = useCallback(async (updates: {agreementid: string, field: string, value: any}[], userName: string) => {
+    const updateMap = new Map<string, Record<string, any>>();
+    updates.forEach(item => {
+      if (!updateMap.has(item.agreementid)) updateMap.set(item.agreementid, {});
+      updateMap.get(item.agreementid)![item.field] = item.value;
+      updateMap.get(item.agreementid)![item.field + '_source'] = 'MANUAL';
+    });
     const newAudits: AuditEntry[] = [];
-    const updateMap = new Map();
-    
-    updates.forEach(u => {
-      if (!updateMap.has(u.agreementid)) {
-        updateMap.set(u.agreementid, {});
+    for (const [agreementid, payload] of updateMap.entries()) {
+      const existing = records.find(row => row.agreementid === agreementid);
+      if (!existing) continue;
+      for (const [field, value] of Object.entries(payload)) {
+        if (!field.endsWith('_source')) newAudits.push({
+          id: crypto.randomUUID(), agreementid, field,
+          oldValue: String(existing[field] ?? ''), newValue: String(value ?? ''),
+          changedBy: userName, createdAt: new Date().toISOString(), source: 'BULK_OPERATION',
+        });
       }
-      updateMap.get(u.agreementid)[u.field] = u.value;
-      updateMap.get(u.agreementid)[`${u.field}_source`] = 'MANUAL';
-    });
-
-    const recordsById = new Map(records.map(r => [r.agreementid, r]));
-    setRecords(prev => {
-      const next = prev.map(r => {
-        if (updateMap.has(r.agreementid)) {
-          const u = updateMap.get(r.agreementid);
-          
-          Object.keys(u).forEach(key => {
-            if (!key.endsWith('_source')) {
-              newAudits.push({
-                id: crypto.randomUUID(),
-                agreementid: r.agreementid,
-                field: key,
-                oldValue: String(r[key] ?? ''),
-                newValue: String(u[key]),
-                changedBy: userName,
-                createdAt: new Date().toISOString(),
-                source: 'MANUAL',
-              });
-            }
-          });
-          
-          return { ...r, ...u };
-        }
-        return r;
-      });
-      return next;
-    });
-
-    setAuditLog(a => [...newAudits, ...a]);
-
-    const formattedUpdates = Array.from(updateMap.entries()).map(([agreementId, upds]) => ({
-      agreementId,
-      updates: upds
-    }));
-
-    if (isCloudFirstEnabled()) {
-      await cloudBulkUpdateLoans(formattedUpdates, userName);
-    } else {
-      await atomicBulkUpdateLoanRecords(formattedUpdates, { userName, userRole: user?.role || 'VIEWER', source: 'BULK_OPERATION' });
     }
-
+    const formattedUpdates = Array.from(updateMap.entries()).map(([agreementId, payload]) => ({ agreementId, updates: payload }));
+    if (isCloudFirstEnabled()) await cloudBulkUpdateLoans(formattedUpdates, userName);
+    else await atomicBulkUpdateLoanRecords(formattedUpdates, { userName, userRole: user?.role || 'VIEWER', source: 'BULK_OPERATION' });
+    setRecords(prev => prev.map(row => updateMap.has(row.agreementid) ? { ...row, ...updateMap.get(row.agreementid) } : row));
+    setAuditLog(prev => [...newAudits, ...prev]);
     setUndoStack(prev => [...prev, { type: 'BULK_UPDATE', audits: newAudits }]);
     setRedoStack([]);
-  }, [user]);
+  }, [user, records]);
 
   const setTarget = useCallback(async (key: string, pct: number, userName: string) => {
     const actor = userName || user?.name || 'System';
@@ -425,10 +399,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         agreementId,
         updates: upds
       }));
-      await atomicBulkUpdateLoanRecords(
-        formattedUpdates,
-        { userName: user?.name || 'Unknown', userRole: user?.role || 'VIEWER', source: 'MANUAL' }
-      );
+      if (isCloudFirstEnabled()) await cloudBulkUpdateLoans(formattedUpdates, user?.name || 'Unknown');
+      else await atomicBulkUpdateLoanRecords(formattedUpdates, { userName: user?.name || 'Unknown', userRole: user?.role || 'VIEWER', source: 'MANUAL' });
     }
   }, [undoStack, user]);
 
@@ -460,10 +432,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         agreementId,
         updates: upds
       }));
-      await atomicBulkUpdateLoanRecords(
-        formattedUpdates,
-        { userName: user?.name || 'Unknown', userRole: user?.role || 'VIEWER', source: 'MANUAL' }
-      );
+      if (isCloudFirstEnabled()) await cloudBulkUpdateLoans(formattedUpdates, user?.name || 'Unknown');
+      else await atomicBulkUpdateLoanRecords(formattedUpdates, { userName: user?.name || 'Unknown', userRole: user?.role || 'VIEWER', source: 'MANUAL' });
     }
   }, [redoStack, user]);
 
