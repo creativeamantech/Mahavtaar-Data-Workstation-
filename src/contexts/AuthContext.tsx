@@ -178,6 +178,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initDb();
   }, []);
 
+  const refreshCloudUsers = async (): Promise<User[]> => {
+    if (!CLOUD_FIRST_AUTH) return users;
+    const client = getSupabaseClient();
+    if (!client || user?.role !== 'ADMIN') return [];
+    const { data, error } = await client.functions.invoke('admin-users', { body: { action: 'list' } });
+    if (error) throw new Error('Unable to load cloud users. Confirm the admin-users function is deployed and configured.');
+    const cloudUsers = Array.isArray(data?.users) ? data.users.map((entry: any): User => {
+      const role = (['ADMIN', 'MANAGER', 'EXECUTIVE', 'VIEWER'].includes(entry.role) ? entry.role : 'VIEWER') as Role;
+      return {
+        id: String(entry.id),
+        name: String(entry.name || entry.email || 'User'),
+        email: String(entry.email || ''),
+        role,
+        assignedExecutiveName: typeof entry.assignedExecutiveName === 'string' ? entry.assignedExecutiveName : undefined,
+        permissions: entry.permissions && Array.isArray(entry.permissions.views)
+          ? { views: entry.permissions.views.filter((view: unknown): view is string => typeof view === 'string') }
+          : { views: DEFAULT_PERMISSIONS[role] || [] },
+      };
+    }) : [];
+    setUsers(cloudUsers);
+    return cloudUsers;
+  };
+
   const login = async (identifier: string, password: string): Promise<User> => {
     if (CLOUD_FIRST_AUTH) {
       const client = getSupabaseClient();
@@ -271,7 +294,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isExecutive = () => user?.role === 'EXECUTIVE';
 
   const addUser = async (u: Omit<User, 'id'> & { password?: string }) => {
-    if (CLOUD_FIRST_AUTH) throw new Error('Cloud user provisioning must use a trusted server-side admin workflow. Provision Supabase Auth accounts and server-managed app_metadata securely first.');
+    if (CLOUD_FIRST_AUTH) {
+      const client = getSupabaseClient();
+      if (!client || user?.role !== 'ADMIN') throw new Error('Administrator access is required.');
+      const { error } = await client.functions.invoke('admin-users', {
+        body: { action: 'create', name: u.name, email: u.email, role: u.role, password: u.password, assignedExecutiveName: u.assignedExecutiveName, permissions: u.permissions },
+      });
+      if (error) throw new Error('Cloud account creation failed. Check the admin-users function and its logs.');
+      await refreshCloudUsers();
+      return;
+    }
     const id = crypto.randomUUID();
     const pw = u.password || 'Admin@123';
     const derived = await derivePasswordHash(pw);
@@ -291,7 +323,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const updateUser = async (id: string, data: Partial<User> & { password?: string }) => {
-    if (CLOUD_FIRST_AUTH) throw new Error('Cloud role, password, and account changes must use a trusted server-side admin workflow.');
+    if (CLOUD_FIRST_AUTH) {
+      const client = getSupabaseClient();
+      if (!client || user?.role !== 'ADMIN') throw new Error('Administrator access is required.');
+      const { error } = await client.functions.invoke('admin-users', {
+        body: { action: 'update', id, name: data.name, email: data.email, role: data.role, password: data.password, assignedExecutiveName: data.assignedExecutiveName, permissions: data.permissions },
+      });
+      if (error) throw new Error('Cloud account update failed. Check the admin-users function and its logs.');
+      await refreshCloudUsers();
+      return;
+    }
     setUsers(prev => prev.map(u => u.id === id ? { ...u, ...data } : u));
     const existing = await db.users.get(id);
     if (existing) {
@@ -336,7 +377,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteUser = async (id: string) => {
-    if (CLOUD_FIRST_AUTH) throw new Error('Cloud accounts must be disabled through the trusted Supabase Auth admin workflow.');
+    if (CLOUD_FIRST_AUTH) {
+      const client = getSupabaseClient();
+      if (!client || user?.role !== 'ADMIN') throw new Error('Administrator access is required.');
+      const { error } = await client.functions.invoke('admin-users', { body: { action: 'delete', id } });
+      if (error) throw new Error('Cloud account deletion failed. Check the admin-users function and its logs.');
+      await refreshCloudUsers();
+      return;
+    }
     setUsers(prev => prev.filter(u => u.id !== id));
     await db.users.delete(id);
   };
