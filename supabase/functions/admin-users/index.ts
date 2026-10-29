@@ -61,6 +61,7 @@ Deno.serve(async (req: Request) => {
         name: cleanText(u.app_metadata?.name || u.user_metadata?.name || u.email, 120),
         role: cleanText(u.app_metadata?.role, 20),
         assignedExecutiveName: cleanText(u.app_metadata?.assignedExecutiveName, 120),
+        maintenanceMode: u.app_metadata?.maintenanceMode === true,
         permissions: u.app_metadata?.permissions ?? undefined,
         emailConfirmed: Boolean(u.email_confirmed_at),
       }));
@@ -88,7 +89,8 @@ Deno.serve(async (req: Request) => {
     if (!validRoles.has(role)) return respond(req, { error: 'Invalid role' }, 400);
     if (role === 'EXECUTIVE' && !assignedExecutiveName) return respond(req, { error: 'Executive data mapping is required for EXECUTIVE accounts' }, 400);
 
-    const app_metadata = { role, name, assignedExecutiveName, permissions: { views } };
+    const maintenanceMode = body?.maintenanceMode === true;
+    const app_metadata = { role, name, assignedExecutiveName, maintenanceMode, permissions: { views } };
     if (action === 'create') {
       const password = typeof body?.password === 'string' ? body.password : '';
       if (password.length < 12) return respond(req, { error: 'Set a temporary password with at least 12 characters' }, 400);
@@ -96,7 +98,7 @@ Deno.serve(async (req: Request) => {
         email, password, email_confirm: true, app_metadata, user_metadata: { name },
       });
       if (error) throw error;
-      return respond(req, { success: true, user: { id: data.user.id, email: data.user.email, name, role, assignedExecutiveName, permissions: { views } } }, 201);
+      return respond(req, { success: true, user: { id: data.user.id, email: data.user.email, name, role, assignedExecutiveName, maintenanceMode, permissions: { views } } }, 201);
     }
 
     if (!id) return respond(req, { error: 'User id required' }, 400);
