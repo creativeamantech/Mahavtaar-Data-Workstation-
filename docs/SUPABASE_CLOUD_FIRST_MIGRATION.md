@@ -6,13 +6,12 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 
 ## Audit findings (2026-10-29)
 
-- The current application authentication in `src/contexts/AuthContext.tsx` is local-only: it reads users and verifies password hashes from Dexie/IndexedDB. It seeds a default local administrator account when the local users table is empty.
-- The main data flow in `src/contexts/DataContext.tsx` loads loan records, targets, upload history, and audit entries from IndexedDB. Loan imports and edits call local repositories.
-- `src/contexts/SyncContext.tsx` and the peer sync engine implement local/peer synchronization. This is separate from Supabase and must not be mistaken for cloud persistence.
-- `src/lib/supabase.ts` currently provides a manual push/pull bridge, not a cloud-first repository layer. The sync operation requires a Supabase Auth session and a server-managed `app_metadata.role = ADMIN`.
-- The Supabase admin diagnostics page at `/mcp-admin` uses Supabase Auth, but the main login page does not. These are currently separate authentication systems.
-- Supabase tables exist, but the last database inspection found zero rows in the seven application tables. No migration of local IndexedDB data has been confirmed. Role-based RLS policies have since been applied; no data was deleted or migrated.
-- A role-based RLS migration is tracked in `supabase/migrations/202610290001_cloud_first_rls.sql` and has been applied to the live project. Loans are readable by permitted roles (executive rows are scoped to trusted assignment/name claims); manager/admin writes are privileged; feedback and attendance have user-scoped policies; targets are readable by signed-in app roles; upload history/audit and `public.users` remain privileged. The policy model still needs end-to-end validation with real accounts.
+- The main login now has an **opt-in** Supabase Auth path in `src/contexts/AuthContext.tsx`; local authentication remains the default when `VITE_CLOUD_FIRST_AUTH` is not `true`.
+- In cloud-first mode, the main loan/target/import/edit paths and the attendance/customer-feedback repositories route through Supabase. This is a partial migration, not proof that every screen has stopped using IndexedDB.
+- `src/contexts/SyncContext.tsx` disables the local peer mesh in cloud-first mode. The legacy peer/local data flow remains for the default local mode.
+- The `admin-users` Edge Function source exists in the branch but is **not deployed**. Cloud user provisioning through the app is therefore unavailable; do not enable cloud-first mode until a trusted provisioning path is ready.
+- Live schema inspection confirmed RLS is enabled on the application tables and the expected role-based policies are present. The policies still need authenticated ADMIN, MANAGER, EXECUTIVE, and VIEWER end-to-end tests.
+- Live table inspection reported zero rows in the inspected application tables at the time of the check. No local IndexedDB migration was performed, and no application data was deleted or migrated.
 
 ## Non-negotiable safety constraints
 
@@ -73,6 +72,12 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 - [ ] Tests, lint, and production build pass.
 - [ ] An authenticated admin and representative executive account complete end-to-end smoke tests.
 
+## Live verification (2026-10-29)
+
+- GitHub Actions CI run `40812191880` completed successfully: dependency lockfile sync, install, production build, unit tests, and lint all passed for commit `02a55bbd16c6ead33e560812bca6435ec7c3697f`.
+- The Supabase security advisor currently reports `auth_leaked_password_protection` as a warning. Enable leaked-password protection in the Supabase Auth security settings before production use: https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
+- The live `pg_policies` inspection showed the expected role-specific policies on loan records, feedback, attendance, targets, upload history, audit log, and user profiles. This verifies policy presence only; it does **not** replace real-user authorization tests.
+
 ## Current release decision
 
-Do not switch the live app to cloud-first until Phase 1 and Phase 2 are complete. At present, doing so would lock users out or leave some screens reading stale IndexedDB data. The existing manual sync bridge is not sufficient evidence that the full application has been migrated.
+Do not switch the live app to cloud-first until Phase 1 and Phase 2 are complete. The `admin-users` function is not deployed, a complete direct-IndexedDB call-site audit remains outstanding, no local-to-cloud migration workflow exists, and role-based end-to-end tests have not been completed. The successful CI run validates build/tests/lint, not production readiness.
