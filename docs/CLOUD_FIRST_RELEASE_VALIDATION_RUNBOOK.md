@@ -83,9 +83,9 @@ A dry-run must be read-only. The commit step must require an explicit administra
 
 ## Follow-up verification (2026-10-29, latest reviewed head)
 
-- CI run #98 passed on commit `6781ba98726c0753d293c68e6fddd2a375ef0f25`: dependency lockfile synchronization, install, production build, unit tests, and lint.
+- CI run #99 passed on latest PR head commit `d45d47069bec2ac49f5ab2b21de61b36950cf114`: dependency lockfile synchronization, install, production build, unit tests, and lint.
 - Cloud user administration now includes `maintenanceMode` in the trusted `app_metadata` payload and returns it from the admin listing endpoint; the client maps this field in both initial admin user loading and refresh. This is covered by the general CI run, but does not yet have dedicated Edge Function integration tests.
 - The live Supabase project currently lists only the `mcp` Edge Function. `admin-users` and `staff-directory` are not deployed, so cloud user management and manager staff-directory loading are not available in the live project.
 - The Supabase security advisor still reports `auth_leaked_password_protection` as a warning. Enable leaked-password protection before production use.
-- The production app's exact HTTPS origin has not been confirmed in the repository/project context. Do not deploy the two functions until the exact allowed origin(s) are known and configured as `ADMIN_USERS_ALLOWED_ORIGINS` and `STAFF_DIRECTORY_ALLOWED_ORIGINS` (or the documented fallback).
+- The production app's exact HTTPS origin is not decided yet. Do not deploy the two functions until the production URL is chosen and the exact allowed origin(s) are configured as `ADMIN_USERS_ALLOWED_ORIGINS` and `STAFF_DIRECTORY_ALLOWED_ORIGINS` (or the documented fallback).
 - PR #7 remains draft and unmerged; `VITE_CLOUD_FIRST_AUTH` remains opt-in. No production function deployment or cloud-first cutover was performed during this verification.
