@@ -24,7 +24,7 @@ interface UserFormSheetProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     user?: User;
-    onSave: (data: Partial<User>) => void;
+    onSave: (data: Partial<User>) => void | Promise<void>;
 }
 
 export function UserFormSheet({ open, onOpenChange, user, onSave }: UserFormSheetProps) {
@@ -140,18 +140,22 @@ export function UserFormSheet({ open, onOpenChange, user, onSave }: UserFormShee
         return groups;
     }, []);
 
-    function handleSubmit(e: React.FormEvent) {
+    async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
-        onSave({
-            name,
-            email,
-            role,
-            assignedExecutiveName: assignedExecutiveName.trim() || undefined,
-            permissions: { views: selectedViews },
-            password: password || undefined,
-            maintenanceMode
-        });
-        onOpenChange(false);
+        try {
+            await onSave({
+                name,
+                email,
+                role,
+                assignedExecutiveName: assignedExecutiveName.trim() || undefined,
+                permissions: { views: selectedViews },
+                password: password || undefined,
+                maintenanceMode
+            });
+            onOpenChange(false);
+        } catch {
+            // Keep the form open so the administrator can correct the input or retry.
+        }
     }
 
   return (
@@ -201,7 +205,8 @@ export function UserFormSheet({ open, onOpenChange, user, onSave }: UserFormShee
                         onChange={e => setPassword(e.target.value)} 
                         type="password" 
                         placeholder={user ? "••••••••" : "Enter password"}
-                        required={!user} 
+                        required={!user}
+                        minLength={12}
                     />
                 </div>
 
