@@ -25,8 +25,16 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 
 ## Implementation sequence
 
+### Current code increment (draft PR)
+
+- Added an opt-in Supabase Auth path for the main login/session lifecycle, using the Supabase Auth session and server-managed `app_metadata` role/permissions.
+- The local demo administrator seed is skipped when cloud auth mode is enabled.
+- Cloud auth mode disables local demo credentials in the login UI and refuses browser-side user creation, role changes, password changes, and account deletion.
+- The opt-in flag is `VITE_CLOUD_FIRST_AUTH=true`. It is deliberately not enabled by default; do not enable it for production until the first administrator and staff accounts are provisioned and the remaining cloud-data migration is complete.
+- This increment does **not** migrate application data CRUD to Supabase. The other screens still have local IndexedDB dependencies, so cloud auth alone is not a production-ready cloud-first release.
+
 ### Phase 1 — Authentication and authorization
-- Use Supabase Auth for the main login/logout/session restoration.
+- Use Supabase Auth for the main login/logout/session restoration (initial opt-in implementation added; still requires provisioned users and end-to-end validation).
 - Read role and trusted authorization claims only from server-managed `app_metadata`, not editable `user_metadata`.
 - Provision the first administrator through a trusted Supabase Dashboard/admin workflow; do not create privileged users from browser code.
 - Define explicit roles and least-privilege RLS for ADMIN, EXECUTIVE, and any read-only roles before enabling non-admin access.
