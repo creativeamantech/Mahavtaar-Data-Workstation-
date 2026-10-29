@@ -49,7 +49,8 @@ export function ShiftAttendanceCard() {
 
   const handlePunchIn = async () => {
     try {
-      await punchIn(user.id, user.name, todayDateStr);
+      const updated = await punchIn(user.id, user.name, todayDateStr);
+      if (isCloudFirstEnabled()) setCloudTodayLog(updated);
       toast.success('Punched in successfully for today!');
     } catch (err: any) {
       toast.error(err?.message || 'Failed to punch in');
@@ -59,10 +60,12 @@ export function ShiftAttendanceCard() {
   const handlePunchOut = async () => {
     if (!todayLog) return;
     try {
+      let currentLog = todayLog;
       if (isOnBreak) {
-        await endBreak(todayLog.id);
+        currentLog = (await endBreak(todayLog.id)) ?? currentLog;
       }
-      await punchOut(todayLog.id);
+      const updated = await punchOut(todayLog.id);
+      if (isCloudFirstEnabled() && updated) setCloudTodayLog(updated);
       toast.success('Punched out successfully. Have a great day!');
     } catch (err: any) {
       toast.error(err?.message || 'Failed to punch out');
@@ -73,10 +76,12 @@ export function ShiftAttendanceCard() {
     if (!todayLog) return;
     try {
       if (isOnBreak) {
-        await endBreak(todayLog.id);
+        const updated = await endBreak(todayLog.id);
+        if (isCloudFirstEnabled() && updated) setCloudTodayLog(updated);
         toast.success('Break ended. Resumed work session.');
       } else {
-        await startBreak(todayLog.id);
+        const updated = await startBreak(todayLog.id);
+        if (isCloudFirstEnabled() && updated) setCloudTodayLog(updated);
         toast.info('Break started. Enjoy your break!');
       }
     } catch (err: any) {
