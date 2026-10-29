@@ -66,20 +66,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         try {
-          const { data, error } = await client.functions.invoke('staff-directory', { body: {} });
-          if (error) throw error;
-          const staff = Array.isArray(data?.staff) ? data.staff : [];
-          if (active) {
-            setUsers(staff.map((entry: { id: string; name: string; role: Role; assignedExecutiveName?: string }) => ({
-              id: entry.id,
-              name: entry.name,
-              role: entry.role,
-              assignedExecutiveName: entry.assignedExecutiveName,
-              permissions: { views: DEFAULT_PERMISSIONS[entry.role] || [] },
-            })));
+          if (cloudUser.role === 'ADMIN') {
+            const { data, error } = await client.functions.invoke('admin-users', { body: { action: 'list' } });
+            if (error) throw error;
+            const cloudUsers = Array.isArray(data?.users) ? data.users.map((entry: any): User => {
+              const role = (['ADMIN', 'MANAGER', 'EXECUTIVE', 'VIEWER'].includes(entry.role) ? entry.role : 'VIEWER') as Role;
+              return {
+                id: String(entry.id),
+                name: String(entry.name || entry.email || 'User'),
+                email: String(entry.email || ''),
+                role,
+                assignedExecutiveName: typeof entry.assignedExecutiveName === 'string' ? entry.assignedExecutiveName : undefined,
+                permissions: entry.permissions && Array.isArray(entry.permissions.views)
+                  ? { views: entry.permissions.views.filter((view: unknown): view is string => typeof view === 'string') }
+                  : { views: DEFAULT_PERMISSIONS[role] || [] },
+              };
+            }) : [];
+            if (active) setUsers(cloudUsers);
+          } else {
+            const { data, error } = await client.functions.invoke('staff-directory', { body: {} });
+            if (error) throw error;
+            const staff = Array.isArray(data?.staff) ? data.staff : [];
+            if (active) {
+              setUsers(staff.map((entry: { id: string; name: string; role: Role; assignedExecutiveName?: string }) => ({
+                id: entry.id,
+                name: entry.name,
+                role: entry.role,
+                assignedExecutiveName: entry.assignedExecutiveName,
+                permissions: { views: DEFAULT_PERMISSIONS[entry.role] || [] },
+              })));
+            }
           }
         } catch (directoryError) {
-          console.warn('[Auth] Cloud staff directory unavailable; staff-based selectors may be incomplete until the endpoint is deployed.', directoryError);
+          console.warn('[Auth] Cloud user/staff directory unavailable; selectors may be incomplete until the required Edge Function is deployed.', directoryError);
           if (active) setUsers([]);
         }
       };
