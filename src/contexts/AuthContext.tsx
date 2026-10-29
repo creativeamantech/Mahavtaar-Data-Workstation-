@@ -60,13 +60,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       let active = true;
+      const loadStaffDirectory = async (cloudUser: User) => {
+        if (!['ADMIN', 'MANAGER'].includes(cloudUser.role)) {
+          if (active) setUsers([]);
+          return;
+        }
+        try {
+          const { data, error } = await client.functions.invoke('staff-directory', { body: {} });
+          if (error) throw error;
+          const staff = Array.isArray(data?.staff) ? data.staff : [];
+          if (active) {
+            setUsers(staff.map((entry: { id: string; name: string; role: Role; assignedExecutiveName?: string }) => ({
+              id: entry.id,
+              name: entry.name,
+              role: entry.role,
+              assignedExecutiveName: entry.assignedExecutiveName,
+              permissions: { views: DEFAULT_PERMISSIONS[entry.role] || [] },
+            })));
+          }
+        } catch (directoryError) {
+          console.warn('[Auth] Cloud staff directory unavailable; staff-based selectors may be incomplete until the endpoint is deployed.', directoryError);
+          if (active) setUsers([]);
+        }
+      };
       const restoreSession = async () => {
         try {
           const { data, error } = await client.auth.getSession();
           if (error) throw error;
           if (data.session?.user && active) {
             try {
-              setUser(mapSupabaseUser(data.session.user));
+              const cloudUser = mapSupabaseUser(data.session.user);
+              setUser(cloudUser);
+              await loadStaffDirectory(cloudUser);
             } catch (roleError) {
               await client.auth.signOut();
               throw roleError;
@@ -86,7 +111,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         try {
-          setUser(mapSupabaseUser(session.user));
+          const cloudUser = mapSupabaseUser(session.user);
+          setUser(cloudUser);
+          void loadStaffDirectory(cloudUser);
         } catch (error) {
           console.error('[Auth] Invalid Supabase role claims', error);
           setUser(null);
