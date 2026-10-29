@@ -95,7 +95,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (isCloudFirstEnabled()) {
-      setStats(prev => ({ ...prev, totalPeers: 0, approvedPeers: 0, onlinePeers: 0, pendingApproval: 0, queuedChanges: 0, networkMode: 'OFFLINE' as NetworkMode }));
+      setStats(prev => ({ ...prev, totalPeers: 0, approvedPeers: 0, onlinePeers: 0, pendingApproval: 0, queuedChanges: 0, networkMode: 'DISABLED' }));
       setPeers([]);
       setSessions([]);
       setConflicts([]);
