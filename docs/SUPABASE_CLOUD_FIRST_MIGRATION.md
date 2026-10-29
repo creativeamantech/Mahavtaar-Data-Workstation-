@@ -10,6 +10,7 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 - In cloud-first mode, the main loan/target/import/edit paths and the attendance/customer-feedback repositories route through Supabase. This is a partial migration, not proof that every screen has stopped using IndexedDB.
 - `src/contexts/SyncContext.tsx` disables the local peer mesh in cloud-first mode. The legacy peer/local data flow remains for the default local mode.
 - The `admin-users` Edge Function source exists in the branch but is **not deployed**. Cloud user provisioning through the app is therefore unavailable; do not enable cloud-first mode until a trusted provisioning path is ready.
+- The `admin-users` Edge Function source now restricts CORS to `ADMIN_USERS_ALLOWED_ORIGINS` (plus local Vite origins by default) and paginates user listing up to 10,000 accounts. Before deployment, set that secret to the exact deployed app origin(s), review the function, and test admin/non-admin/expired-session cases. It remains **not deployed**.
 - Live schema inspection confirmed RLS is enabled on the application tables and the expected role-based policies are present. The policies still need authenticated ADMIN, MANAGER, EXECUTIVE, and VIEWER end-to-end tests.
 - Live table inspection reported zero rows in the inspected application tables at the time of the check. No local IndexedDB migration was performed, and no application data was deleted or migrated.
 
