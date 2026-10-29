@@ -13,7 +13,7 @@ interface AuthContextType {
   isExecutive: () => boolean;
   users: User[];
   addUser: (u: Omit<User, 'id'> & { password?: string }) => Promise<void>;
-  updateUser: (id: string, data: Partial<User>) => Promise<void>;
+  updateUser: (id: string, data: Partial<User> & { password?: string }) => Promise<void>;
   deleteUser: (id: string) => Promise<void>;
 }
 
