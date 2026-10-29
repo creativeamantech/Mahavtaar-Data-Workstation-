@@ -87,3 +87,13 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 ## Current release decision
 
 Do not switch the live app to cloud-first until Phase 1 and Phase 2 are complete. The `admin-users` function is not deployed, a complete direct-IndexedDB call-site audit remains outstanding, no local-to-cloud migration workflow exists, and role-based end-to-end tests have not been completed. The successful CI run validates build/tests/lint, not production readiness.
+
+
+## Follow-up audit progress (2026-10-29)
+
+- Reviewed the attendance and feedback screens/repositories, `DataContext`, `AuthContext`, the cloud repository, and the current role-based RLS migration. Cloud-mode attendance and feedback reads route through cloud repository functions; local Dexie hooks in the reviewed attendance/feedback screens are guarded by the cloud-first flag. `AuthContext`'s local password/user mutations are in the non-cloud login branch, while cloud account administration deliberately throws and requires the trusted server workflow.
+- Fixed the executive shift card so successful cloud punch-in, punch-out, and break actions immediately update its displayed attendance state. This is a client-state refresh fix; it does not add server-side transaction guarantees or Realtime subscriptions.
+- Cloud loan writes and audit inserts are still separate requests. A loan can be saved even if the later audit insert fails, and bulk writes span multiple batches; use a database RPC/transaction before treating these operations as atomic.
+- The RLS SQL and client-side role guards have been reviewed statically, but role isolation has not been proven with authenticated ADMIN, MANAGER, EXECUTIVE, and VIEWER sessions. In particular, executive access depends on trusted `app_metadata` assignment fields matching the loan/feedback rows. Do not substitute UI filtering for RLS tests.
+- Latest code change: `32d9953ce6cbfdf730edd73d073b725baf7772a0` (attendance cloud state refresh). GitHub Actions run #84 passed dependency lockfile synchronization, dependency installation, production build, unit tests, and lint. This is CI validation only; it does not authorize production cutover.
+- Remaining blockers are unchanged: finish the full IndexedDB/direct-storage call-site audit, deploy and test trusted admin provisioning with an explicit `ADMIN_USERS_ALLOWED_ORIGINS` allowlist, implement a dry-run/backup/reconciliation migration workflow, complete role-based end-to-end tests, and enable leaked-password protection in Supabase Auth.
