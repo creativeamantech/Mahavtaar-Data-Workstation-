@@ -31,7 +31,10 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 - The local demo administrator seed is skipped when cloud auth mode is enabled.
 - Cloud auth mode disables local demo credentials in the login UI and refuses browser-side user creation, role changes, password changes, and account deletion.
 - The opt-in flag is `VITE_CLOUD_FIRST_AUTH=true`. It is deliberately not enabled by default; do not enable it for production until the first administrator and staff accounts are provisioned and the remaining cloud-data migration is complete.
-- This increment does **not** migrate application data CRUD to Supabase. The other screens still have local IndexedDB dependencies, so cloud auth alone is not a production-ready cloud-first release.
+- Added `src/lib/cloudRepository.ts` for paginated cloud loan reads, bounded upserts, loan edits, audit writes, targets, upload history, and audit reads. These methods deliberately throw on cloud errors rather than falling back to local data.
+- `DataContext` now routes the primary loan load, main/paid/additional/corrected imports, manual/bulk updates, targets, upload history, and audit reads through Supabase when cloud-first mode is enabled; local peer-journal transport in that context is disabled.
+- This is still a partial migration: attendance, customer-feedback entry, user provisioning/management, backup/restore, some peer-sync UI/actions, and other direct IndexedDB access paths still need migration. Cloud-first remains opt-in and must not be enabled for production yet.
+- Current live RLS policies remain ADMIN-only on all seven tables. Non-admin users cannot use these data paths until role-specific RLS policies are reviewed and applied. Do not loosen the policies to anonymous access.
 
 ### Phase 1 — Authentication and authorization
 - Use Supabase Auth for the main login/logout/session restoration (initial opt-in implementation added; still requires provisioned users and end-to-end validation).
