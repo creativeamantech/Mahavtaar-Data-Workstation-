@@ -60,9 +60,8 @@ export function ShiftAttendanceCard() {
   const handlePunchOut = async () => {
     if (!todayLog) return;
     try {
-      let currentLog = todayLog;
       if (isOnBreak) {
-        currentLog = (await endBreak(todayLog.id)) ?? currentLog;
+        await endBreak(todayLog.id);
       }
       const updated = await punchOut(todayLog.id);
       if (isCloudFirstEnabled() && updated) setCloudTodayLog(updated);
