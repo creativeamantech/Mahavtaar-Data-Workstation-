@@ -53,6 +53,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<User[]>([]);
 
   useEffect(() => {
+    if (CLOUD_FIRST_AUTH) {
+      const client = getSupabaseClient();
+      if (!client || !isSupabaseConfigured()) {
+        setLoading(false);
+        return;
+      }
+      let active = true;
+      const restoreSession = async () => {
+        try {
+          const { data, error } = await client.auth.getSession();
+          if (error) throw error;
+          if (data.session?.user && active) {
+            try {
+              setUser(mapSupabaseUser(data.session.user));
+            } catch (roleError) {
+              await client.auth.signOut();
+              throw roleError;
+            }
+          }
+        } catch (error) {
+          console.error('[Auth] Supabase session restore failed', error);
+        } finally {
+          if (active) setLoading(false);
+        }
+      };
+      void restoreSession();
+      const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
+        if (!active) return;
+        if (!session?.user) {
+          setUser(null);
+          return;
+        }
+        try {
+          setUser(mapSupabaseUser(session.user));
+        } catch (error) {
+          console.error('[Auth] Invalid Supabase role claims', error);
+          setUser(null);
+          void client.auth.signOut();
+        }
+      });
+      return () => {
+        active = false;
+        listener.subscription.unsubscribe();
+      };
+    }
+
     async function initDb() {
       try {
         const count = await db.users.count();
@@ -106,6 +152,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (identifier: string, password: string): Promise<User> => {
+    if (CLOUD_FIRST_AUTH) {
+      const client = getSupabaseClient();
+      if (!client) throw new Error('Cloud login is enabled but Supabase is not configured.');
+      const email = identifier.trim().toLowerCase();
+      if (!email.includes('@')) throw new Error('Use the email address registered in Supabase Auth.');
+      const { data, error } = await client.auth.signInWithPassword({ email, password });
+      if (error || !data.user) throw new Error(error?.message || 'Supabase sign-in failed.');
+      const cloudUser = mapSupabaseUser(data.user);
+      setUser(cloudUser);
+      return cloudUser;
+    }
+
     const searchStr = identifier.trim().toLowerCase();
     const found: any = await db.users.filter(u => 
       u.name.trim().toLowerCase() === searchStr || (!!u.email && u.email.trim().toLowerCase() === searchStr)
@@ -180,6 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isExecutive = () => user?.role === 'EXECUTIVE';
 
   const addUser = async (u: Omit<User, 'id'> & { password?: string }) => {
+    if (CLOUD_FIRST_AUTH) throw new Error('Cloud user provisioning must use a trusted server-side admin workflow. Provision Supabase Auth accounts and server-managed app_metadata securely first.');
     const id = crypto.randomUUID();
     const pw = u.password || 'Admin@123';
     const derived = await derivePasswordHash(pw);
@@ -199,6 +258,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const updateUser = async (id: string, data: Partial<User> & { password?: string }) => {
+    if (CLOUD_FIRST_AUTH) throw new Error('Cloud role, password, and account changes must use a trusted server-side admin workflow.');
     setUsers(prev => prev.map(u => u.id === id ? { ...u, ...data } : u));
     const existing = await db.users.get(id);
     if (existing) {
@@ -243,6 +303,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteUser = async (id: string) => {
+    if (CLOUD_FIRST_AUTH) throw new Error('Cloud accounts must be disabled through the trusted Supabase Auth admin workflow.');
     setUsers(prev => prev.filter(u => u.id !== id));
     await db.users.delete(id);
   };
