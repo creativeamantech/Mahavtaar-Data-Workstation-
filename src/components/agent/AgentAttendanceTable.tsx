@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ColumnDef,
   SortingState,
@@ -22,8 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { format as formatTZ, toZonedTime } from 'date-fns-tz';
 import { parseISO, differenceInMinutes } from "date-fns";
 import { useAuth } from "../../contexts/AuthContext";
-import { db } from '../../lib/db';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { getAttendanceByUserId } from '../../lib/repositories/attendanceRepository';
 
 interface AttendanceRecord {
   id: string;
@@ -68,15 +67,26 @@ export function AgentAttendanceTable() {
   const { user } = useAuth();
   const [sorting, setSorting] = useState<SortingState>([]);
 
-  const agentAttendance = useLiveQuery(
-    async () => {
-      if (!user) return [];
-      const records = await db.attendance_logs.where('userId').equals(user.id).reverse().sortBy('date');
-      return records;
-    },
-    [user],
-    []
-  );
+  const [agentAttendance, setAgentAttendance] = useState<AttendanceRecord[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    if (!user) {
+      setAgentAttendance([]);
+      return () => { active = false; };
+    }
+
+    getAttendanceByUserId(user.id)
+      .then(records => {
+        if (active) setAgentAttendance(records as AttendanceRecord[]);
+      })
+      .catch(error => {
+        console.error('Unable to load executive attendance history:', error);
+        if (active) setAgentAttendance([]);
+      });
+
+    return () => { active = false; };
+  }, [user?.id]);
 
   const columns: ColumnDef<AttendanceRecord>[] = [
     {
