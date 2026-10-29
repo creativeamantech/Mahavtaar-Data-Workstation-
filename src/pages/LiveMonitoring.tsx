@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { AppLayout } from '../components/layout/AppLayout';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -14,6 +14,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Link } from 'react-router-dom';
 import { LiveDetailsSheet } from '@/components/dashboard/LiveDetailsSheet';
 import { fmtCur } from '../lib/formatters';
+import { getAllFeedbacks } from '../lib/repositories/feedbackRepository';
+import { isCloudFirstEnabled } from '../lib/cloudRepository';
+import { toast } from 'sonner';
 
 interface AgentMetrics {
   name: string;
@@ -29,15 +32,21 @@ export default function LiveMonitoring() {
   const [sheetData, setSheetData] = useState<{ title: string; customers: LoanRecord[] }>({ title: '', customers: [] });
   const [isSheetOpen, setSheetOpen] = useState(false);
 
-  // Reactive live query to update automatically on new entries or P2P sync
-  const feedbacks = useLiveQuery(
-    async () => {
-      const data = await db.customer_feedbacks.toArray();
-      return data;
-    },
+  // Cloud-first mode reads feedback from Supabase and never falls back to IndexedDB.
+  const localFeedbacks = useLiveQuery(
+    async () => isCloudFirstEnabled() ? [] : await db.customer_feedbacks.toArray(),
     [],
     [] as CustomerFeedback[]
   );
+  const [cloudFeedbacks, setCloudFeedbacks] = useState<CustomerFeedback[]>([]);
+  useEffect(() => {
+    if (!isCloudFirstEnabled()) return;
+    let active = true;
+    getAllFeedbacks().then(rows => { if (active) setCloudFeedbacks(rows); })
+      .catch(error => { if (active) toast.error(error instanceof Error ? error.message : 'Unable to load cloud feedback.'); });
+    return () => { active = false; };
+  }, []);
+  const feedbacks = isCloudFirstEnabled() ? cloudFeedbacks : (localFeedbacks || []);
 
   const filteredFeedbacks = useMemo(() => {
     if (!feedbacks) return [];
