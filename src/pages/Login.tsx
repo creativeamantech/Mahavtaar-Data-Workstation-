@@ -22,8 +22,8 @@ export default function Login() {
     try {
       const user = await login(email, password);
       navigate(user.role === 'EXECUTIVE' ? '/exec-dashboard' : '/dashboard');
-    } catch {
-      setError('Invalid credentials');
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : 'Sign-in failed.');
     } finally {
       setLoading(false);
     }
@@ -93,13 +93,14 @@ export default function Login() {
             
             <div className="mb-8 hidden lg:block">
               <h3 className="text-2xl font-bold tracking-tight">Welcome back</h3>
-              <p className="text-sm text-muted-foreground mt-1">Enter your credentials to access your account</p>
+              <p className="text-sm text-muted-foreground mt-1">{CLOUD_FIRST_AUTH ? 'Sign in with your provisioned Supabase account' : 'Enter your credentials to access your account'}</p>
             </div>
 
             <div className="mb-5">
               <label className="mb-2 block font-sans text-xs font-bold uppercase tracking-widest text-muted-foreground">{CLOUD_FIRST_AUTH ? 'Supabase account email' : 'Name or Email'}</label>
               <input
-                type="text"
+                type={CLOUD_FIRST_AUTH ? 'email' : 'text'}
+                autoComplete="username"
                 autoFocus
                 value={email}
                 onChange={e => setEmail(e.target.value)}
@@ -117,6 +118,7 @@ export default function Login() {
                   onChange={e => setPassword(e.target.value)}
                   className="h-11 w-full rounded-md border border-input bg-background/50 px-4 pr-11 font-sans text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
                   placeholder="••••••••"
+                  autoComplete="current-password"
                 />
                 <button
                   type="button"
@@ -142,11 +144,18 @@ export default function Login() {
               {loading ? <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" /> : CLOUD_FIRST_AUTH ? 'Sign in securely' : 'Authenticate'}
             </button>
                       
-            <div className="mt-8 text-center">
-              <p className="font-sans text-xs font-medium text-muted-foreground/60">
-                Demo access: <span className="text-muted-foreground">admin@company.com</span> / <span className="text-muted-foreground">Admin@123</span>
-              </p>
-            </div>
+            {CLOUD_FIRST_AUTH ? (
+              <div className="mt-6 text-center space-y-2">
+                {!isSupabaseConfigured() && <p role="alert" className="text-xs text-destructive">Cloud login is enabled, but Supabase URL or publishable/anon key is missing.</p>}
+                <p className="font-sans text-xs text-muted-foreground/70">Accounts must be provisioned securely in Supabase. Local demo credentials are disabled in cloud mode.</p>
+              </div>
+            ) : (
+              <div className="mt-8 text-center">
+                <p className="font-sans text-xs font-medium text-muted-foreground/60">
+                  Demo access: <span className="text-muted-foreground">admin@company.com</span> / <span className="text-muted-foreground">Admin@123</span>
+                </p>
+              </div>
+            )}
           </form>
         </div>
       </div>
