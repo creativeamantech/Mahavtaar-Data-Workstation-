@@ -37,7 +37,7 @@ Deno.serve(async (req: Request) => {
   if (!URL || !ANON || !SERVICE) return respond(req, { error: 'Server is not configured' }, 503);
 
   const bearer = req.headers.get('authorization') ?? '';
-  const match = bearer.match(/^Bearer\\s+(.+)$/i);
+  const match = bearer.match(/^Bearer\s+(.+)$/i);
   if (!match) return respond(req, { error: 'Authentication required' }, 401);
 
   const authClient = createClient(URL, ANON, { auth: { persistSession: false, autoRefreshToken: false } });
