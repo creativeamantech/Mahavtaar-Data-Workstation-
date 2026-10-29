@@ -152,35 +152,37 @@ function UserManagementTab() {
   };
 
   const handleSave = async (data: Partial<User>) => {
-    if (isCloudFirstEnabled()) {
-      toast.error('Cloud user provisioning is not enabled yet. Create accounts only through the trusted administrator workflow.');
-      return;
-    }
     const role = (data.role || 'VIEWER') as Role;
-    const views = data.permissions?.views && data.permissions.views.length > 0 
-      ? data.permissions.views 
+    const views = data.permissions?.views && data.permissions.views.length > 0
+      ? data.permissions.views
       : (DEFAULT_PERMISSIONS[role] || []);
 
-    if (editingUser) {
-        await updateUser(editingUser.id, { 
-            name: data.name, 
-            email: data.email, 
-            role: role, 
-            permissions: { views },
-            assignedExecutiveName: data.assignedExecutiveName,
-            maintenanceMode: (data as any).maintenanceMode
+    try {
+      if (editingUser) {
+        await updateUser(editingUser.id, {
+          name: data.name,
+          email: data.email,
+          role,
+          permissions: { views },
+          assignedExecutiveName: data.assignedExecutiveName,
+          maintenanceMode: (data as any).maintenanceMode,
+          password: data.password || undefined,
         });
-        toast.success('User updated successfully');
-    } else {
+        toast.success(isCloudFirstEnabled() ? 'Cloud user updated successfully' : 'User updated successfully');
+      } else {
         await addUser({
-            name: data.name!,
-            email: data.email!,
-            role: role,
-            password: data.password || undefined,
-            permissions: { views },
-            assignedExecutiveName: data.assignedExecutiveName,
+          name: data.name!,
+          email: data.email!,
+          role,
+          password: data.password || undefined,
+          permissions: { views },
+          assignedExecutiveName: data.assignedExecutiveName,
         });
-        toast.success('User created successfully');
+        toast.success(isCloudFirstEnabled() ? 'Cloud user created successfully' : 'User created successfully');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to save user');
+      throw error;
     }
   };
 
@@ -233,18 +235,18 @@ function UserManagementTab() {
     <div className="space-y-4">
       <div className="flex justify-between">
         <h2 className="text-lg font-semibold">User Management</h2>
-        {!isCloudFirstEnabled() && <div className="flex gap-2">
-          <Button variant="destructive" onClick={handleWipeDatabase}>
+        <div className="flex gap-2">
+          {!isCloudFirstEnabled() && <Button variant="destructive" onClick={handleWipeDatabase}>
             {confirmWipe ? 'CONFIRM WIPE' : 'Wipe Database'}
-          </Button>
+          </Button>}
           <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" /> Add User</Button>
-        </div>}
+        </div>
       </div>
-      {isCloudFirstEnabled() && <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
-        <strong>Cloud account administration is not yet connected.</strong>
-        <p className="mt-1 text-muted-foreground">This screen cannot create, edit, or delete Supabase Auth users. To prevent local-only changes being mistaken for cloud changes, account actions and local database wipe are hidden in cloud-first mode.</p>
+      {isCloudFirstEnabled() && <div className="rounded-lg border border-sky-500/40 bg-sky-500/5 p-4 text-sm">
+        <strong>Supabase cloud user management</strong>
+        <p className="mt-1 text-muted-foreground">Changes are sent to the secured admin-users Edge Function. The function must be deployed and configured for these actions to work.</p>
       </div>}
-      {!isCloudFirstEnabled() && <DataTable columns={columns} data={users} pageSize={20} />}
+      <DataTable columns={columns} data={users} pageSize={20} />
       
       <UserFormSheet 
         open={sheetOpen}
