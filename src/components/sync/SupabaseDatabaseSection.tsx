@@ -204,9 +204,6 @@ CREATE TABLE IF NOT EXISTS public.users (
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
     role TEXT NOT NULL DEFAULT 'VIEWER',
-    "passwordHash" TEXT,
-    salt TEXT,
-    iterations INT,
     permissions JSONB DEFAULT '{"views":[]}'::jsonb,
     "assignedExecutiveName" TEXT,
     "maintenanceMode" BOOLEAN DEFAULT FALSE,
@@ -272,30 +269,37 @@ DROP POLICY IF EXISTS "Allow anon for state_targets" ON public.state_targets;
 DROP POLICY IF EXISTS "Allow anon for upload_sessions" ON public.upload_sessions;
 DROP POLICY IF EXISTS "Allow anon for audit_log" ON public.audit_log;
 
+DROP POLICY IF EXISTS "Authenticated admins only" ON public.loan_records;
 CREATE POLICY "Authenticated admins only" ON public.loan_records
   FOR ALL TO authenticated
   USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
   WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
+DROP POLICY IF EXISTS "Authenticated admins only" ON public.customer_feedbacks;
 CREATE POLICY "Authenticated admins only" ON public.customer_feedbacks
   FOR ALL TO authenticated
   USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
   WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
+DROP POLICY IF EXISTS "Authenticated admins only" ON public.users;
 CREATE POLICY "Authenticated admins only" ON public.users
   FOR ALL TO authenticated
   USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
   WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
+DROP POLICY IF EXISTS "Authenticated admins only" ON public.attendance_logs;
 CREATE POLICY "Authenticated admins only" ON public.attendance_logs
   FOR ALL TO authenticated
   USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
   WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
+DROP POLICY IF EXISTS "Authenticated admins only" ON public.state_targets;
 CREATE POLICY "Authenticated admins only" ON public.state_targets
   FOR ALL TO authenticated
   USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
   WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
+DROP POLICY IF EXISTS "Authenticated admins only" ON public.upload_sessions;
 CREATE POLICY "Authenticated admins only" ON public.upload_sessions
   FOR ALL TO authenticated
   USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
   WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN');
+DROP POLICY IF EXISTS "Authenticated admins only" ON public.audit_log;
 CREATE POLICY "Authenticated admins only" ON public.audit_log
   FOR ALL TO authenticated
   USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'ADMIN')
