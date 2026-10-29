@@ -29,6 +29,14 @@ begin
       raise exception 'Each loan record must contain agreementid';
     end if;
 
+    perform 1
+      from public.loan_records
+      where agreementid = v_record ->> 'agreementid'
+      for update;
+    if not found then
+      raise exception 'Loan record % no longer exists; no changes were committed', v_record ->> 'agreementid';
+    end if;
+
     select string_agg(format('%I = EXCLUDED.%I', key, key), ', ')
       into v_columns
       from jsonb_object_keys(v_record) as keys(key)
