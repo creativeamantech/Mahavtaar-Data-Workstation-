@@ -72,6 +72,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     networkMode: 'ALL'
   });
 
+  const ensureLocalSyncEnabled = () => {
+    if (!isCloudFirstEnabled()) return true;
+    toast.error('Local peer sync and local backup/restore are disabled in cloud-first mode.');
+    return false;
+  };
+
   const refreshSyncData = useCallback(async () => {
     try {
       const allPeers = await syncEngine.getAllPeers();
@@ -121,6 +127,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   const triggerManualSync = async () => {
+    if (!ensureLocalSyncEnabled()) return;
     setIsSyncing(true);
     try {
       const count = await syncEngine.triggerGlobalSync();
@@ -138,6 +145,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   };
 
   const approvePeer = async (peerId: string) => {
+    if (!ensureLocalSyncEnabled()) return;
     try {
       await syncEngine.approvePeer(peerId, user?.name || 'Admin');
       toast.success('Peer device approved for CRM synchronization');
@@ -148,6 +156,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   };
 
   const rejectPeer = async (peerId: string) => {
+    if (!ensureLocalSyncEnabled()) return;
     try {
       await syncEngine.rejectPeer(peerId);
       toast.info('Peer device rejected');
@@ -158,6 +167,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   };
 
   const disablePeer = async (peerId: string) => {
+    if (!ensureLocalSyncEnabled()) return;
     try {
       await syncEngine.disablePeer(peerId);
       toast.warning('Peer device synchronization disabled');
@@ -168,6 +178,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   };
 
   const reEnablePeer = async (peerId: string) => {
+    if (!ensureLocalSyncEnabled()) return;
     try {
       await syncEngine.reEnablePeer(peerId);
       toast.success('Peer device re-enabled and synchronized');
@@ -178,6 +189,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   };
 
   const removePeer = async (peerId: string) => {
+    if (!ensureLocalSyncEnabled()) return;
     try {
       await syncEngine.removePeer(peerId);
       toast.success('Peer removed from registry');
@@ -192,6 +204,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     resolution: 'KEEP_LOCAL' | 'KEEP_REMOTE' | 'FIELD_MERGE' | 'MANUAL',
     customData?: any
   ) => {
+    if (!ensureLocalSyncEnabled()) return;
     try {
       await resolveConflictRecord(conflictId, resolution, customData, user?.name || 'Admin');
       toast.success(`Conflict resolved with strategy: ${resolution}`);
@@ -202,6 +215,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   };
 
   const createBackup = async (label?: string) => {
+    if (!ensureLocalSyncEnabled()) return;
     try {
       const snap = await backupManager.createBackup('MANUAL', label);
       toast.success(`Backup created: ${snap.checksum} (${snap.recordCounts.records} records)`);
@@ -212,6 +226,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   };
 
   const restoreBackup = async (payload: string, mode: 'MERGE' | 'REPLACE') => {
+    if (!ensureLocalSyncEnabled()) return;
     try {
       const result = await backupManager.restoreBackupFromPayload(payload, mode);
       toast.success(`Backup restored successfully (${result.restoredRecords} records, ${result.restoredFeedbacks} feedbacks)`);
@@ -222,10 +237,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   };
 
   const verifyBackup = async (backupId: string) => {
+    if (!ensureLocalSyncEnabled()) return { valid: false, details: 'Local backup verification is disabled in cloud-first mode.' };
     return await backupManager.verifyBackupIntegrity(backupId);
   };
 
   const downloadBackup = async (backupId: string) => {
+    if (!ensureLocalSyncEnabled()) return;
     try {
       await backupManager.downloadBackupAsFile(backupId);
       toast.success('Backup file downloaded to local drive');
@@ -235,6 +252,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteBackup = async (backupId: string) => {
+    if (!ensureLocalSyncEnabled()) return;
     try {
       await backupManager.deleteBackup(backupId);
       toast.info('Backup snapshot deleted');
@@ -245,12 +263,14 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setNetworkMode = (mode: NetworkMode) => {
+    if (!ensureLocalSyncEnabled()) return;
     syncEngine.getTransportManager().setNetworkMode(mode);
     setStats(prev => ({ ...prev, networkMode: mode }));
     toast.info(`P2P Network Mode set to: ${mode}`);
   };
 
   const setScheduleBackupMinutes = (mins: number) => {
+    if (!ensureLocalSyncEnabled()) return;
     backupManager.setScheduleInterval(mins);
     setScheduleBackupMinutesState(mins);
     if (mins > 0) {
@@ -268,18 +288,22 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   };
 
   const generatePairingOffer = async (targetPeerId: string) => {
+    if (!ensureLocalSyncEnabled()) throw new Error('Peer pairing is disabled in cloud-first mode.');
     return await syncEngine.getTransportManager().getWebRTCTransport().createOfferForPeer(targetPeerId);
   };
 
   const acceptPairingOffer = async (offerBase64: string) => {
+    if (!ensureLocalSyncEnabled()) throw new Error('Peer pairing is disabled in cloud-first mode.');
     return await syncEngine.getTransportManager().getWebRTCTransport().acceptOfferAndCreateAnswer(offerBase64);
   };
 
   const acceptPairingAnswer = async (answerBase64: string) => {
+    if (!ensureLocalSyncEnabled()) throw new Error('Peer pairing is disabled in cloud-first mode.');
     await syncEngine.getTransportManager().getWebRTCTransport().acceptAnswer(answerBase64);
   };
 
   const requestPairingFromPayload = async (payload: string) => {
+    if (!ensureLocalSyncEnabled()) throw new Error('Peer pairing is disabled in cloud-first mode.');
     await syncEngine.requestPairingFromPayload(payload);
   };
 
