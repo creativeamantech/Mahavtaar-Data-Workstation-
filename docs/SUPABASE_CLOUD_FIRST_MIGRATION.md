@@ -78,6 +78,7 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 ## Live verification (2026-10-29)
 
 - GitHub Actions CI run `40813648520` completed successfully for commit `e99bc4ac266648a1ffd7927a0c1c4205fb20c8b8`, including dependency lockfile sync, install, production build, unit tests, and lint. The subsequent audit-verification guard commit must pass CI before it is treated as verified.
+- GitHub Actions CI run `40814609388` (run #75) completed successfully for the subsequent cloud audit-verification guard commit. The latest diagnostics guard and its documentation commits were also reviewed; the most recent CI success available here is run #75. This does not constitute role-based end-to-end or production cutover validation.
 - The Supabase security advisor currently reports `auth_leaked_password_protection` as a warning. Enable leaked-password protection in the Supabase Auth security settings before production use: https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
 - The live `pg_policies` inspection showed the expected role-specific policies on loan records, feedback, attendance, targets, upload history, audit log, and user profiles. This verifies policy presence only; it does **not** replace real-user authorization tests.
 
