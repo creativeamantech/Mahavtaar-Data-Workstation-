@@ -77,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 email: String(entry.email || ''),
                 role,
                 assignedExecutiveName: typeof entry.assignedExecutiveName === 'string' ? entry.assignedExecutiveName : undefined,
+                maintenanceMode: entry.maintenanceMode === true,
                 permissions: entry.permissions && Array.isArray(entry.permissions.views)
                   ? { views: entry.permissions.views.filter((view: unknown): view is string => typeof view === 'string') }
                   : { views: DEFAULT_PERMISSIONS[role] || [] },
@@ -211,6 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: String(entry.email || ''),
         role,
         assignedExecutiveName: typeof entry.assignedExecutiveName === 'string' ? entry.assignedExecutiveName : undefined,
+        maintenanceMode: entry.maintenanceMode === true,
         permissions: entry.permissions && Array.isArray(entry.permissions.views)
           ? { views: entry.permissions.views.filter((view: unknown): view is string => typeof view === 'string') }
           : { views: DEFAULT_PERMISSIONS[role] || [] },
