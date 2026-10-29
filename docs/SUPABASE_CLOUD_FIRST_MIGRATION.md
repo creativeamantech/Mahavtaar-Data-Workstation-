@@ -12,7 +12,7 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 - `src/lib/supabase.ts` currently provides a manual push/pull bridge, not a cloud-first repository layer. The sync operation requires a Supabase Auth session and a server-managed `app_metadata.role = ADMIN`.
 - The Supabase admin diagnostics page at `/mcp-admin` uses Supabase Auth, but the main login page does not. These are currently separate authentication systems.
 - Supabase tables exist, but the last database inspection found zero rows in the seven application tables. No migration of local IndexedDB data has been confirmed. Role-based RLS policies have since been applied; no data was deleted or migrated.
-- RLS is administrator-only. It is not yet a complete policy model for executives, staff attendance, row-level portfolio assignments, or user profile reads.
+- A role-based RLS migration is tracked in `supabase/migrations/202610290001_cloud_first_rls.sql` and has been applied to the live project. Loans are readable by permitted roles (executive rows are scoped to trusted assignment/name claims); manager/admin writes are privileged; feedback and attendance have user-scoped policies; targets are readable by signed-in app roles; upload history/audit and `public.users` remain privileged. The policy model still needs end-to-end validation with real accounts.
 
 ## Non-negotiable safety constraints
 
@@ -33,18 +33,18 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 - The opt-in flag is `VITE_CLOUD_FIRST_AUTH=true`. It is deliberately not enabled by default; do not enable it for production until the first administrator and staff accounts are provisioned and the remaining cloud-data migration is complete.
 - Added `src/lib/cloudRepository.ts` for paginated cloud loan reads, bounded upserts, loan edits, audit writes, targets, upload history, and audit reads. These methods deliberately throw on cloud errors rather than falling back to local data.
 - `DataContext` now routes the primary loan load, main/paid/additional/corrected imports, manual/bulk updates, targets, upload history, and audit reads through Supabase when cloud-first mode is enabled; local peer-journal transport in that context is disabled.
-- This is still a partial migration: attendance, customer-feedback entry, user provisioning/management, backup/restore, some peer-sync UI/actions, and other direct IndexedDB access paths still need migration. Cloud-first remains opt-in and must not be enabled for production yet.
-- Current live RLS policies remain ADMIN-only on all seven tables. Non-admin users cannot use these data paths until role-specific RLS policies are reviewed and applied. Do not loosen the policies to anonymous access.
+- Attendance and customer-feedback repository functions now use Supabase in cloud-first mode; the attendance history and executive dashboard flows were routed through those repositories. Some screens still contain direct IndexedDB access and need a full audit. Cloud-first remains opt-in and must not be enabled for production yet.
+- Settings now disables local-only backup/restore, factory reset, and local user management when cloud-first mode is enabled, to avoid misleading or destructive local-only operations. A proposed trusted `admin-users` Edge Function source file exists in the branch but is **not deployed**; cloud user provisioning remains unavailable until it is reviewed, safely deployed, and connected to the UI.
 
 ### Phase 1 — Authentication and authorization
 - Use Supabase Auth for the main login/logout/session restoration (initial opt-in implementation added; still requires provisioned users and end-to-end validation).
 - Read role and trusted authorization claims only from server-managed `app_metadata`, not editable `user_metadata`.
-- Provision the first administrator through a trusted Supabase Dashboard/admin workflow; do not create privileged users from browser code.
+- Provision the first administrator through a trusted Supabase Dashboard/admin workflow; do not create privileged users from browser code. The proposed `admin-users` function is not live yet.
 - Define explicit roles and least-privilege RLS for ADMIN, EXECUTIVE, and any read-only roles before enabling non-admin access.
 - Replace the local default administrator seed with a migration notice; never silently grant a new device administrator access.
 
 ### Phase 2 — Cloud repositories
-- Introduce typed Supabase repositories for loans, feedback, attendance, targets, upload sessions, and audit events.
+- Typed Supabase repositories exist for loans, feedback, attendance, targets, upload sessions, and audit events; direct IndexedDB call sites still need a complete audit.
 - Move list, detail, search/filter, create/update, import, and report flows to those repositories.
 - Keep IndexedDB only for explicitly local preferences, temporary import staging, and a future opt-in offline cache.
 - Ensure imports are validated and committed in bounded transactions/batches with progress and actionable error reporting.
@@ -63,7 +63,7 @@ Make Supabase PostgreSQL the authoritative store for the Mahavtaar Data Workstat
 
 ## Acceptance checklist
 
-- [ ] Main login uses Supabase Auth and restores/clears sessions correctly.
+- [ ] Main login uses Supabase Auth and restores/clears sessions correctly; code path is opt-in and still needs end-to-end validation.
 - [ ] No default browser-side administrator is seeded.
 - [ ] Every protected read/write is denied by RLS to an unauthorized user.
 - [ ] All primary features read and write through cloud repositories.
