@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Eye, EyeOff, Hexagon, CheckCircle2 } from 'lucide-react';
+import { isSupabaseConfigured } from '../lib/supabase';
+
+const CLOUD_FIRST_AUTH = import.meta.env.VITE_CLOUD_FIRST_AUTH === 'true';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -94,14 +97,14 @@ export default function Login() {
             </div>
 
             <div className="mb-5">
-              <label className="mb-2 block font-sans text-xs font-bold uppercase tracking-widest text-muted-foreground">Name or Email</label>
+              <label className="mb-2 block font-sans text-xs font-bold uppercase tracking-widest text-muted-foreground">{CLOUD_FIRST_AUTH ? 'Supabase account email' : 'Name or Email'}</label>
               <input
                 type="text"
                 autoFocus
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 className="h-11 w-full rounded-md border border-input bg-background/50 px-4 font-sans text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                placeholder="e.g. Aarti Sharma"
+                placeholder={CLOUD_FIRST_AUTH ? 'name@company.com' : 'e.g. Aarti Sharma'}
               />
             </div>
             
@@ -133,10 +136,10 @@ export default function Login() {
             
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || (CLOUD_FIRST_AUTH && !isSupabaseConfigured())}
               className="flex h-12 w-full items-center justify-center rounded-md bg-primary font-sans text-sm font-bold uppercase tracking-widest text-primary-foreground transition-all hover:bg-primary/90 disabled:opacity-50"
             >
-              {loading ? <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" /> : 'Authenticate'}
+              {loading ? <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" /> : CLOUD_FIRST_AUTH ? 'Sign in securely' : 'Authenticate'}
             </button>
                       
             <div className="mt-8 text-center">
