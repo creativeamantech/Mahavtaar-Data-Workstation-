@@ -7,7 +7,7 @@ import { db, AttendanceLog } from '../db';
 import { incrementLamportClock } from '../sync/journal';
 import { getLocalDeviceIdentity } from '../sync/deviceIdentity';
 import { ValidationError } from '../errors';
-import { cloudFetchAttendance, cloudSaveAttendance, isCloudFirstEnabled } from '../cloudRepository';
+import { cloudFetchAttendance, cloudSaveAttendance, cloudPunchIn, isCloudFirstEnabled } from '../cloudRepository';
 
 export async function getAttendanceByUserId(userId: string): Promise<AttendanceLog[]> {
   if (isCloudFirstEnabled()) return (await cloudFetchAttendance()).filter(row => row.userId === userId).sort((a, b) => b.date.localeCompare(a.date));
@@ -51,7 +51,7 @@ export async function punchIn(
     breakDuration: 0,
   };
 
-  if (isCloudFirstEnabled()) return await cloudSaveAttendance(newLog);
+  if (isCloudFirstEnabled()) return await cloudPunchIn(newLog);
 
   await db.transaction('rw', [db.attendance_logs, db.sync_journal], async () => {
     await db.attendance_logs.put(newLog);
