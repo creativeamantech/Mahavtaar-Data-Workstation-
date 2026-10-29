@@ -208,9 +208,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
     setUploadHistory(prev => [entry, ...prev]);
     
-    const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
-    const dbRecords = await fetchAuthorizedLoanRecords(user);
-    setRecords(dbRecords);
+    if (isCloudFirstEnabled()) {
+      setRecords(await cloudFetchLoans());
+    } else {
+      const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
+      setRecords(await fetchAuthorizedLoanRecords(user));
+    }
     
     return { rowCount: normalizedRecords.length };
   }, [user]);
@@ -232,9 +235,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
     setUploadHistory(prev => [entry, ...prev]);
     
-    const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
-    const dbRecords = await fetchAuthorizedLoanRecords(user);
-    setRecords(dbRecords);
+    if (isCloudFirstEnabled()) {
+      setRecords(await cloudFetchLoans());
+    } else {
+      const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
+      setRecords(await fetchAuthorizedLoanRecords(user));
+    }
     
     return { matched, total: paidRows.length }; 
   }, [user]);
@@ -247,13 +253,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const matched = additionalRows.filter(p => allDbRecords.some(r => r.agreementid === p.agreementid)).length;
     
     const entry = { id: crypto.randomUUID(), type: 'ADDITIONAL_COLLECTION_FILE', fileName, recordCount: additionalRows.length, uploadedBy: userName, createdAt: new Date().toISOString() };
+    if (isCloudFirstEnabled()) {
+      await cloudUpsertLoans(merged);
+      await cloudSaveUpload(entry as UploadSession);
+      setRecords(await cloudFetchLoans());
+    } else {
+      await atomicFileImport(merged, entry as UploadSession);
+      const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
+      setRecords(await fetchAuthorizedLoanRecords(user));
+    }
     setUploadHistory(prev => [entry, ...prev]);
-    
-    await atomicFileImport(merged, entry as UploadSession);
-    
-    const { fetchAuthorizedLoanRecords } = await import('../lib/repositories/loanRepository');
-    const dbRecords = await fetchAuthorizedLoanRecords(user);
-    setRecords(dbRecords);
     
     return { matched, total: additionalRows.length, stats };
   }, [user]);
@@ -304,7 +313,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     
     setUndoStack(prev => [...prev, { type: 'UPDATE', audits: [audit] }]);
     setRedoStack([]);
-  }, [user]);
+  }, [user, records]);
 
 
   const bulkUpdateRecords = useCallback(async (updates: {agreementid: string, field: string, value: any}[], userName: string) => {
@@ -368,6 +377,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const actor = userName || user?.name || 'System';
     if (isCloudFirstEnabled()) {
       await cloudSaveTarget(key, pct, actor);
+      setTargets(prev => {
+        const next = { ...prev };
+        if (pct <= 0) delete next[key];
+        else next[key] = pct;
+        return next;
+      });
     } else if (pct <= 0) {
       setTargets(prev => {
         const next = { ...prev };
